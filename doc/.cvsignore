@@ -1,0 +1,8 @@
+Makefile
+*.html
+muttrc.man
+manual.sgml
+manual.txt
+stamp-*
+instdoc
+instdoc.sh
