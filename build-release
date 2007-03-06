@@ -1,0 +1,109 @@
+#!/bin/sh --
+
+#
+# Build a mutt release.
+#
+# This used to be part of the main Makefile, but is better handled
+# by a shell script.
+#
+# Note that this script won't work for you.  I'm including it with 
+# the distribution for the sake of completeness.
+#
+# Thomas Roessler <roessler@guug.de> Mon,  8 Nov 1999 22:32:41 +0100
+#
+
+set -e
+
+if test "$1" = "-nodiff" ; then
+	diff=no
+else
+	diff=yes
+fi
+
+
+devel="devel/"	# comment out for the stable branch
+
+# update the source
+
+#cvs update
+
+# Do automated security checks
+
+./check_sec.sh || exit 1
+
+# bump the version number, and calculate the tags
+
+rm -f VERSION 
+cvs update VERSION 
+OVERSION="`cat VERSION`" 
+OTAG="mutt-`echo $OVERSION | tr . -`-rel" 
+
+echo $OVERSION | awk -F . '{printf("%d.%d.%d\n", $1, $2, $3 + 1);}' > VERSION 
+${VISUAL} VERSION
+
+VERSION="`cat VERSION`" 
+TAG="mutt-`echo $VERSION | tr . -`-rel" 
+
+#echo 'const char *ReleaseDate = "'`date +%Y-%m-%d`'";' > reldate.h
+
+make update-changelog 
+
+# now, prepare the distribution tar balls
+
+#automake
+#touch configure.in
+make config.status
+./config.status
+make update-doc
+make update-changelog
+(cd po && make update-po)
+
+# build them
+
+make dist
+
+# commit and tag the release
+
+#cvs commit -m "automatic post-release commit for mutt-${VERSION}"
+#make commit-changelog 
+#cvs tag ${TAG}
+
+# build the diff between the two releases
+
+if test "$diff" = yes ; then
+	cvs rdiff -u -r ${OTAG} -r ${TAG} mutt | gzip -9 \
+		> diff-${OVERSION}-${VERSION}.gz
+fi
+
+# sign the various files
+
+# DISTFILES="mutt-${VERSION}.tar.gz mutt-${VERSION}i.tar.gz diff-${OVERSION}i-${VERSION}i.gz"
+DISTFILES="mutt-${VERSION}.tar.gz"
+
+if test "$diff" = yes ; then
+	DISTFILES="$DISTFILES diff-${OVERSION}-${VERSION}.gz"
+fi
+
+for f in $DISTFILES; do
+	gpg -ba $f
+	chmod 644 $f.asc
+done
+
+exit 0
+
+echo "Release built.  Please connect to the net and press <enter>"
+echo "when on-line."
+
+read dummy
+
+for f in $DISTFILES ; do
+#	scp1 $f $f.asc sigtrap.guug.de:/home/ftp/pub/mutt/${devel}
+	scp $f $f.asc trithemius.gnupg.org:/home/ftp/mutt/${devel}
+done
+
+cvs update
+
+# Finally, announce the new mutt to the public
+
+# mutt -s "[Announce] mutt-${VERSION} is out" mutt-dev@mutt.org
+
