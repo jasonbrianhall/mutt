@@ -113,7 +113,7 @@ int query_quadoption (int opt, const char *prompt)
 
     default:
       v = mutt_yesorno (prompt, (v == M_ASKYES));
-      CLEARLINE (LINES - 1);
+      mutt_window_clearline (MuttMessageWindow, 0);
       return (v);
   }
 
@@ -1611,6 +1611,8 @@ static void mutt_restore_default (struct option_t *p)
     set_option (OPTRESORTINIT);
   if (p->flags & R_TREE)
     set_option (OPTREDRAWTREE);
+  if (p->flags & R_REFLOW)
+    mutt_reflow_windows ();
 }
 
 static size_t escape_string (char *dst, size_t len, const char* src)
@@ -2226,6 +2228,8 @@ static int parse_set (BUFFER *tmp, BUFFER *s, unsigned long data, BUFFER *err)
         set_option (OPTRESORTINIT);
       if (MuttVars[idx].flags & R_TREE)
         set_option (OPTREDRAWTREE);
+      if (MuttVars[idx].flags & R_REFLOW)
+        mutt_reflow_windows ();
     }
   }
   return (r);

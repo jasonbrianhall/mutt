@@ -63,6 +63,14 @@ static size_t UngetCount = 0;
 static size_t UngetLen = 0;
 static event_t *UngetKeyEvents;
 
+mutt_window_t *MuttHelpWindow = NULL;
+mutt_window_t *MuttIndexWindow = NULL;
+mutt_window_t *MuttStatusWindow = NULL;
+mutt_window_t *MuttMessageWindow = NULL;
+#ifdef USE_SIDEBAR
+mutt_window_t *MuttSidebarWindow = NULL;
+#endif
+
 void mutt_refresh (void)
 {
   /* don't refresh when we are waiting for a child. */
@@ -146,22 +154,22 @@ event_t mutt_getch (void)
 int _mutt_get_field (const char *field, char *buf, size_t buflen, int complete, int multiple, char ***files, int *numfiles)
 {
   int ret;
-  int x, y;
+  int x;
 
   ENTER_STATE *es = mutt_new_enter_state();
   
   do
   {
-    CLEARLINE (LINES-1);
+    mutt_window_clearline (MuttMessageWindow, 0);
     SETCOLOR (MT_COLOR_PROMPT);
     addstr ((char *)field); /* cast to get around bad prototypes */
     NORMAL_COLOR;
     mutt_refresh ();
-    getyx (stdscr, y, x);
-    ret = _mutt_enter_string (buf, buflen, y, x, complete, multiple, files, numfiles, es);
+    mutt_window_getyx (MuttMessageWindow, &ret, &x);  /* don't care about y: avoiding unused var warning */
+    ret = _mutt_enter_string (buf, buflen, x, complete, multiple, files, numfiles, es);
   }
   while (ret == 1);
-  CLEARLINE (LINES-1);
+  mutt_window_clearline (MuttMessageWindow, 0);
   mutt_free_enter_state (&es);
   
   return (ret);
@@ -182,7 +190,7 @@ void mutt_clear_error (void)
 {
   Errorbuf[0] = 0;
   if (!option(OPTNOCURSES))
-    CLEARLINE (LINES-1);
+    mutt_window_clearline (MuttMessageWindow, 0);
 }
 
 void mutt_edit_file (const char *editor, const char *data)
@@ -229,7 +237,7 @@ int mutt_yesorno (const char *msg, int def)
             !REGCOMP (&reno, expr, REG_NOSUB);
 #endif
 
-  CLEARLINE(LINES-1);
+  mutt_window_clearline (MuttMessageWindow, 0);
 
   /*
    * In order to prevent the default answer to the question to wrapped
@@ -240,7 +248,7 @@ int mutt_yesorno (const char *msg, int def)
   safe_asprintf (&answer_string, " ([%s]/%s): ", def == M_YES ? yes : no, def == M_YES ? no : yes);
   answer_string_len = mutt_strwidth (answer_string);
   /* maxlen here is sort of arbitrary, so pick a reasonable upper bound */
-  msglen = mutt_wstr_trunc (msg, 4*COLS, COLS - answer_string_len, NULL);
+  msglen = mutt_wstr_trunc (msg, 4*MuttMessageWindow->cols, MuttMessageWindow->cols - answer_string_len, NULL);
   SETCOLOR (MT_COLOR_PROMPT);
   addnstr (msg, msglen);
   addstr (answer_string);
@@ -333,16 +341,16 @@ static void curses_message (int error, const char *fmt, va_list ap)
 
   dprint (1, (debugfile, "%s\n", scratch));
   mutt_format_string (Errorbuf, sizeof (Errorbuf),
-		      0, COLS, FMT_LEFT, 0, scratch, sizeof (scratch), 0);
+		      0, MuttMessageWindow->cols, FMT_LEFT, 0, scratch, sizeof (scratch), 0);
 
   if (!option (OPTKEEPQUIET))
   {
     if (error)
       BEEP ();
     SETCOLOR (error ? MT_COLOR_ERROR : MT_COLOR_MESSAGE);
-    mvaddstr (LINES-1, 0, Errorbuf);
+    mutt_window_mvaddstr (MuttMessageWindow, 0, 0, Errorbuf);
     NORMAL_COLOR;
-    clrtoeol ();
+    mutt_window_clrtoeol (MuttMessageWindow);
     mutt_refresh ();
   }
 
@@ -479,15 +487,161 @@ out:
     mutt_clear_error ();
 }
 
+void mutt_init_windows ()
+{
+  MuttHelpWindow = safe_calloc (sizeof (mutt_window_t), 1);
+  MuttIndexWindow = safe_calloc (sizeof (mutt_window_t), 1);
+  MuttStatusWindow = safe_calloc (sizeof (mutt_window_t), 1);
+  MuttMessageWindow = safe_calloc (sizeof (mutt_window_t), 1);
+#ifdef USE_SIDEBAR
+  MuttSidebarWindow = safe_calloc (sizeof (mutt_window_t), 1);
+#endif
+
+  mutt_reflow_windows ();
+}
+
+void mutt_free_windows ()
+{
+  FREE (&MuttHelpWindow);
+  FREE (&MuttIndexWindow);
+  FREE (&MuttStatusWindow);
+  FREE (&MuttMessageWindow);
+#ifdef USE_SIDEBAR
+  FREE (&MuttSidebarWindow);
+#endif
+}
+
+void mutt_reflow_windows (void)
+{
+  if (option (OPTNOCURSES))
+    return;
+
+  dprint (2, (debugfile, "In mutt_reflow_windows\n"));
+
+  MuttStatusWindow->rows = 1;
+  MuttStatusWindow->cols = COLS;
+  MuttStatusWindow->row_offset = option (OPTSTATUSONTOP) ? 0 : LINES - 2;
+  MuttStatusWindow->col_offset = 0;
+
+  memcpy (MuttHelpWindow, MuttStatusWindow, sizeof (mutt_window_t));
+  if (! option (OPTHELP))
+    MuttHelpWindow->rows = 0;
+  else
+    MuttHelpWindow->row_offset = option (OPTSTATUSONTOP) ? LINES - 2 : 0;
+
+  memcpy (MuttMessageWindow, MuttStatusWindow, sizeof (mutt_window_t));
+  MuttMessageWindow->row_offset = LINES - 1;
+
+  memcpy (MuttIndexWindow, MuttStatusWindow, sizeof (mutt_window_t));
+  MuttIndexWindow->rows = LINES - MuttStatusWindow->rows - MuttHelpWindow->rows -
+                          MuttMessageWindow->rows;
+  MuttIndexWindow->row_offset = option (OPTSTATUSONTOP) ? MuttStatusWindow->rows :
+                                                          MuttHelpWindow->rows;
+
+#ifdef USE_SIDEBAR
+  if (option (OPTSIDEBAR))
+  {
+    memcpy (MuttSidebarWindow, MuttIndexWindow, sizeof (mutt_window_t));
+    MuttSidebarWindow->cols = SidebarWidth;
+
+    MuttIndexWindow->cols -= SidebarWidth;
+    MuttIndexWindow->col_offset += SidebarWidth;
+  }
+#endif
+}
+
+int mutt_window_move (mutt_window_t *win, int row, int col)
+{
+  return move (win->row_offset + row, win->col_offset + col);
+}
+
+int mutt_window_mvaddch (mutt_window_t *win, int row, int col, const chtype ch)
+{
+  return mvaddch (win->row_offset + row, win->col_offset + col, ch);
+}
+
+int mutt_window_mvaddstr (mutt_window_t *win, int row, int col, const char *str)
+{
+  return mvaddstr (win->row_offset + row, win->col_offset + col, str);
+}
+
+#ifdef USE_SLANG_CURSES
+static int vw_printw (SLcurses_Window_Type *win, const char *fmt, va_list ap)
+{
+  char buf[LONG_STRING];
+
+  (void) SLvsnprintf (buf, sizeof (buf), (char *)fmt, ap);
+  SLcurses_waddnstr (win, buf, -1);
+  return 0;
+}
+#endif
+
+int mutt_window_mvprintw (mutt_window_t *win, int row, int col, const char *fmt, ...)
+{
+  va_list ap;
+  int rv;
+
+  if ((rv = mutt_window_move (win, row, col) != ERR))
+  {
+    va_start (ap, fmt);
+    rv = vw_printw (stdscr, fmt, ap);
+    va_end (ap);
+  }
+
+  return rv;
+}
+
+/* Assumes the cursor has already been positioned within the
+ * window.
+ */
+void mutt_window_clrtoeol (mutt_window_t *win)
+{
+  int row, col, curcol;
+
+  if (win->col_offset + win->cols == COLS)
+    clrtoeol ();
+  else
+  {
+    getyx (stdscr, row, col);
+    curcol = col;
+    while (curcol < win->col_offset + win->cols)
+    {
+      addch (' ');
+      curcol++;
+    }
+    move (row, col);
+  }
+}
+
+void mutt_window_clearline (mutt_window_t *win, int row)
+{
+  mutt_window_move (win, row, 0);
+  mutt_window_clrtoeol (win);
+}
+
+/* Assumes the current position is inside the window.
+ * Otherwise it will happily return negative or values outside
+ * the window boundaries
+ */
+void mutt_window_getyx (mutt_window_t *win, int *y, int *x)
+{
+  int row, col;
+
+  getyx (stdscr, row, col);
+  *y = row - win->row_offset;
+  *x = col - win->col_offset;
+}
+
+
 void mutt_show_error (void)
 {
   if (option (OPTKEEPQUIET))
     return;
   
   SETCOLOR (option (OPTMSGERR) ? MT_COLOR_ERROR : MT_COLOR_MESSAGE);
-  mvaddstr(LINES-1, 0, Errorbuf);
+  mutt_window_mvaddstr (MuttMessageWindow, 0, 0, Errorbuf);
   NORMAL_COLOR;
-  clrtoeol();
+  mutt_window_clrtoeol(MuttMessageWindow);
 }
 
 void mutt_endwin (const char *msg)
@@ -582,18 +736,18 @@ int _mutt_enter_fname (const char *prompt, char *buf, size_t blen, int *redraw, 
   event_t ch;
 
   SETCOLOR (MT_COLOR_PROMPT);
-  mvaddstr (LINES-1, 0, (char *) prompt);
+  mutt_window_mvaddstr (MuttMessageWindow, 0, 0, (char *) prompt);
   addstr (_(" ('?' for list): "));
   NORMAL_COLOR;
   if (buf[0])
     addstr (buf);
-  clrtoeol ();
+  mutt_window_clrtoeol (MuttMessageWindow);
   mutt_refresh ();
 
   ch = mutt_getch();
   if (ch.ch < 0)
   {
-    CLEARLINE (LINES-1);
+    mutt_window_clearline (MuttMessageWindow, 0);
     return (-1);
   }
   else if (ch.ch == '?')
@@ -706,9 +860,9 @@ int mutt_multi_choice (char *prompt, char *letters)
   char *p;
 
   SETCOLOR (MT_COLOR_PROMPT);
-  mvaddstr (LINES - 1, 0, prompt);
+  mutt_window_mvaddstr (MuttMessageWindow, 0, 0, prompt);
   NORMAL_COLOR;
-  clrtoeol ();
+  mutt_window_clrtoeol (MuttMessageWindow);
   FOREVER
   {
     mutt_refresh ();
@@ -736,7 +890,7 @@ int mutt_multi_choice (char *prompt, char *letters)
     }
     BEEP ();
   }
-  CLEARLINE (LINES - 1);
+  mutt_window_clearline (MuttMessageWindow, 0);
   mutt_refresh ();
   return choice;
 }
@@ -1034,6 +1188,8 @@ int mutt_strwidth (const char *s)
   {
     if (k == (size_t)(-1) || k == (size_t)(-2))
     {
+      if (k == (size_t)(-1))
+        memset (&mbstate, 0, sizeof (mbstate));
       k = (k == (size_t)(-1)) ? 1 : n;
       wc = replacement_char ();
     }

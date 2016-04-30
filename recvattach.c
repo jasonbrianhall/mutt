@@ -173,6 +173,7 @@ ATTACHPTR **mutt_gen_attach_list (BODY *m,
 const char *mutt_attach_fmt (char *dest,
     size_t destlen,
     size_t col,
+    int cols,
     char op,
     const char *src,
     const char *prefix,
@@ -365,15 +366,15 @@ const char *mutt_attach_fmt (char *dest,
   }
   
   if (optional)
-    mutt_FormatString (dest, destlen, col, ifstring, mutt_attach_fmt, data, 0);
+    mutt_FormatString (dest, destlen, col, cols, ifstring, mutt_attach_fmt, data, 0);
   else if (flags & M_FORMAT_OPTIONAL)
-    mutt_FormatString (dest, destlen, col, elsestring, mutt_attach_fmt, data, 0);
+    mutt_FormatString (dest, destlen, col, cols, elsestring, mutt_attach_fmt, data, 0);
   return (src);
 }
 
 static void attach_entry (char *b, size_t blen, MUTTMENU *menu, int num)
 {
-  mutt_FormatString (b, blen, 0, NONULL (AttachFormat), mutt_attach_fmt, (unsigned long) (((ATTACHPTR **)menu->data)[num]), M_FORMAT_ARROWCURSOR);
+  mutt_FormatString (b, blen, 0, MuttIndexWindow->cols, NONULL (AttachFormat), mutt_attach_fmt, (unsigned long) (((ATTACHPTR **)menu->data)[num]), M_FORMAT_ARROWCURSOR);
 }
 
 int mutt_tag_attach (MUTTMENU *menu, int n, int m)
@@ -590,7 +591,7 @@ mutt_query_pipe_attachment (char *command, FILE *fp, BODY *body, int filter)
 	      _("WARNING!  You are about to overwrite %s, continue?"),
 	      body->filename);
     if (mutt_yesorno (warning, M_NO) != M_YES) {
-      CLEARLINE (LINES-1);
+      mutt_window_clearline (MuttMessageWindow, 0);
       return;
     }
     mutt_mktemp (tfile, sizeof (tfile));
