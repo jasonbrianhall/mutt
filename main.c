@@ -547,13 +547,14 @@ static void start_curses (void)
   meta (stdscr, TRUE);
 #endif
 init_extended_keys();
+  mutt_init_windows ();
 }
 
-#define M_IGNORE  (1<<0)	/* -z */
-#define M_BUFFY   (1<<1)	/* -Z */
-#define M_NOSYSRC (1<<2)	/* -n */
-#define M_RO      (1<<3)	/* -R */
-#define M_SELECT  (1<<4)	/* -y */
+#define MUTT_IGNORE  (1<<0)	/* -z */
+#define MUTT_BUFFY   (1<<1)	/* -Z */
+#define MUTT_NOSYSRC (1<<2)	/* -n */
+#define MUTT_RO      (1<<3)	/* -R */
+#define MUTT_SELECT  (1<<4)	/* -y */
 
 int main (int argc, char **argv)
 {
@@ -697,7 +698,7 @@ int main (int argc, char **argv)
 	break;
 
       case 'n':
-	flags |= M_NOSYSRC;
+	flags |= MUTT_NOSYSRC;
 	break;
 
       case 'p':
@@ -709,7 +710,7 @@ int main (int argc, char **argv)
         break;
       
       case 'R':
-	flags |= M_RO; /* read-only mode */
+	flags |= MUTT_RO; /* read-only mode */
 	break;
 
       case 's':
@@ -725,15 +726,15 @@ int main (int argc, char **argv)
 	break;
 
       case 'y': /* My special hack mode */
-	flags |= M_SELECT;
+	flags |= MUTT_SELECT;
 	break;
 
       case 'z':
-	flags |= M_IGNORE;
+	flags |= MUTT_IGNORE;
 	break;
 
       case 'Z':
-	flags |= M_BUFFY | M_IGNORE;
+	flags |= MUTT_BUFFY | MUTT_IGNORE;
 	break;
 
       default:
@@ -781,7 +782,7 @@ int main (int argc, char **argv)
   }
 
   /* set defaults and read init files */
-  mutt_init (flags & M_NOSYSRC, commands);
+  mutt_init (flags & MUTT_NOSYSRC, commands);
   mutt_free_list (&commands);
 
   /* Initialize crypto backends.  */
@@ -846,7 +847,7 @@ int main (int argc, char **argv)
     if (stat (fpath, &sb) == -1 && errno == ENOENT)
     {
       snprintf (msg, sizeof (msg), _("%s does not exist. Create it?"), Maildir);
-      if (mutt_yesorno (msg, M_YES) == M_YES)
+      if (mutt_yesorno (msg, MUTT_YES) == MUTT_YES)
       {
 	if (mkdir (fpath, 0700) == -1 && errno != EEXIST)
 	  mutt_error ( _("Can't create %s: %s."), Maildir, strerror (errno));
@@ -859,6 +860,7 @@ int main (int argc, char **argv)
     if (!option (OPTNOCURSES))
       mutt_flushinp ();
     ci_send_message (SENDPOSTPONED, NULL, NULL, NULL, NULL);
+    mutt_free_windows ();
     mutt_endwin (NULL);
   }
   else if (subject || msg || sendflags || draftFile || includeFile || attach ||
@@ -1148,14 +1150,17 @@ int main (int argc, char **argv)
     }
 
     if (!option (OPTNOCURSES))
+    {
+      mutt_free_windows ();
       mutt_endwin (NULL);
+    }
 
     if (rv)
       exit(1);
   }
   else
   {
-    if (flags & M_BUFFY)
+    if (flags & MUTT_BUFFY)
     {
       if (!mutt_buffy_check (0))
       {
@@ -1165,14 +1170,14 @@ int main (int argc, char **argv)
       folder[0] = 0;
       mutt_buffy (folder, sizeof (folder));
     }
-    else if (flags & M_SELECT)
+    else if (flags & MUTT_SELECT)
     {
       if (!Incoming) {
 	mutt_endwin _("No incoming mailboxes defined.");
 	exit (1);
       }
       folder[0] = 0;
-      mutt_select_file (folder, sizeof (folder), M_SEL_FOLDER | M_SEL_BUFFY);
+      mutt_select_file (folder, sizeof (folder), MUTT_SEL_FOLDER | MUTT_SEL_BUFFY);
       if (!folder[0])
       {
 	mutt_endwin (NULL);
@@ -1187,7 +1192,7 @@ int main (int argc, char **argv)
     mutt_str_replace (&CurrentFolder, folder);
     mutt_str_replace (&LastFolder, folder);
 
-    if (flags & M_IGNORE)
+    if (flags & MUTT_IGNORE)
     {
       /* check to see if there are any messages in the folder */
       switch (mx_check_empty (folder))
@@ -1203,7 +1208,7 @@ int main (int argc, char **argv)
 
     mutt_folder_hook (folder);
 
-    if((Context = mx_open_mailbox (folder, ((flags & M_RO) || option (OPTREADONLY)) ? M_READONLY : 0, NULL))
+    if((Context = mx_open_mailbox (folder, ((flags & MUTT_RO) || option (OPTREADONLY)) ? MUTT_READONLY : 0, NULL))
        || !explicit_folder)
     {
       mutt_index_menu ();
@@ -1217,6 +1222,7 @@ int main (int argc, char **argv)
     mutt_sasl_done ();
 #endif
     mutt_free_opts ();
+    mutt_free_windows ();
     mutt_endwin (Errorbuf);
   }
 

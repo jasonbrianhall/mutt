@@ -188,16 +188,16 @@ void mutt_ts_icon(char *str)
 
 void index_make_entry (char *s, size_t l, MUTTMENU *menu, int num)
 {
-  format_flag flag = M_FORMAT_MAKEPRINT | M_FORMAT_ARROWCURSOR | M_FORMAT_INDEX;
+  format_flag flag = MUTT_FORMAT_MAKEPRINT | MUTT_FORMAT_ARROWCURSOR | MUTT_FORMAT_INDEX;
   int edgemsgno, reverse = Sort & SORT_REVERSE;
   HEADER *h = Context->hdrs[Context->v2r[num]];
   THREAD *tmp;
 
   if ((Sort & SORT_MASK) == SORT_THREADS && h->tree)
   {
-    flag |= M_FORMAT_TREE; /* display the thread tree */
+    flag |= MUTT_FORMAT_TREE; /* display the thread tree */
     if (h->display_subject)
-      flag |= M_FORMAT_FORCESUBJ;
+      flag |= MUTT_FORMAT_FORCESUBJ;
     else
     {
       if (reverse)
@@ -219,13 +219,13 @@ void index_make_entry (char *s, size_t l, MUTTMENU *menu, int num)
 	 * subject... */
 	if (reverse ? tmp->message->msgno > edgemsgno : tmp->message->msgno < edgemsgno)
 	{
-	  flag |= M_FORMAT_FORCESUBJ;
+	  flag |= MUTT_FORMAT_FORCESUBJ;
 	  break;
 	}
 	else if (tmp->message->virtual >= 0)
 	  break;
       }
-      if (flag & M_FORMAT_FORCESUBJ)
+      if (flag & MUTT_FORMAT_FORCESUBJ)
       {
 	for (tmp = h->thread->prev; tmp; tmp = tmp->prev)
 	{
@@ -237,7 +237,7 @@ void index_make_entry (char *s, size_t l, MUTTMENU *menu, int num)
 	    break;
 	  else if (tmp->message->virtual >= 0)
 	  {
-	    flag &= ~M_FORMAT_FORCESUBJ;
+	    flag &= ~MUTT_FORMAT_FORCESUBJ;
 	    break;
 	  }
 	}
@@ -364,13 +364,13 @@ static void update_index (MUTTMENU *menu, CONTEXT *ctx, int check,
   if (ctx->pattern)
   {
 #define THIS_BODY ctx->hdrs[j]->content
-    for (j = (check == M_REOPENED) ? 0 : oldcount; j < ctx->msgcount; j++)
+    for (j = (check == MUTT_REOPENED) ? 0 : oldcount; j < ctx->msgcount; j++)
     {
       if (!j)
 	ctx->vcount = 0;
 
       if (mutt_pattern_exec (ctx->limit_pattern,
-			     M_MATCH_FULL_ADDRESS,
+			     MUTT_MATCH_FULL_ADDRESS,
 			     ctx, ctx->hdrs[j]))
       {
 	assert (ctx->vcount < ctx->msgcount);
@@ -385,7 +385,7 @@ static void update_index (MUTTMENU *menu, CONTEXT *ctx, int check,
   }
 
   /* save the list of new messages */
-  if (oldcount && check != M_REOPENED
+  if (oldcount && check != MUTT_REOPENED
       && ((Sort & SORT_MASK) == SORT_THREADS))
   {
     save_new = (HEADER **) safe_malloc (sizeof (HEADER *) * (ctx->msgcount - oldcount));
@@ -394,12 +394,12 @@ static void update_index (MUTTMENU *menu, CONTEXT *ctx, int check,
   }
 
   /* if the mailbox was reopened, need to rethread from scratch */
-  mutt_sort_headers (ctx, (check == M_REOPENED));
+  mutt_sort_headers (ctx, (check == MUTT_REOPENED));
 
   /* uncollapse threads with new mail */
   if ((Sort & SORT_MASK) == SORT_THREADS)
   {
-    if (check == M_REOPENED)
+    if (check == MUTT_REOPENED)
     {
       THREAD *h, *j;
 
@@ -510,8 +510,6 @@ int mutt_index_menu (void)
   int attach_msg = option(OPTATTACHMSG);
 
   menu = mutt_new_menu (MENU_MAIN);
-  menu->offset = 1;
-  menu->pagelen = LINES - 3;
   menu->make_entry = index_make_entry;
   menu->color = index_color;
   menu->current = ci_first_message ();
@@ -562,19 +560,19 @@ int mutt_index_menu (void)
 
 	set_option (OPTSEARCHINVALID);
       }
-      else if (check == M_NEW_MAIL || check == M_REOPENED || check == M_FLAGS)
+      else if (check == MUTT_NEW_MAIL || check == MUTT_REOPENED || check == MUTT_FLAGS)
       {
 	update_index (menu, Context, check, oldcount, index_hint);
 
 	/* notify the user of new mail */
-	if (check == M_REOPENED)
+	if (check == MUTT_REOPENED)
 	  mutt_error _("Mailbox was externally modified.  Flags may be wrong.");
-	else if (check == M_NEW_MAIL)
+	else if (check == MUTT_NEW_MAIL)
 	{
 	  mutt_message _("New mail in this mailbox.");
 	  if (option (OPTBEEPNEW))
 	    beep ();
-	} else if (check == M_FLAGS)
+	} else if (check == MUTT_FLAGS)
 	  mutt_message _("Mailbox was externally modified.");
 
 	/* avoid the message being overwritten by buffy */
@@ -631,9 +629,9 @@ int mutt_index_menu (void)
       if (menu->redraw & REDRAW_STATUS)
       {
 	menu_status_line (buf, sizeof (buf), menu, NONULL (Status));
-	move (option (OPTSTATUSONTOP) ? 0 : LINES-2, 0);
+        mutt_window_move (MuttStatusWindow, 0, 0);
 	SETCOLOR (MT_COLOR_STATUS);
-	mutt_paddstr (COLS, buf);
+	mutt_paddstr (MuttStatusWindow->cols, buf);
 	NORMAL_COLOR;
 	menu->redraw &= ~REDRAW_STATUS;
 	if (option(OPTTSENABLED) && TSSupported)
@@ -652,11 +650,12 @@ int mutt_index_menu (void)
 	menu->oldcurrent = -1;
 
       if (option (OPTARROWCURSOR))
-	move (menu->current - menu->top + menu->offset, 2);
+	mutt_window_move (MuttIndexWindow, menu->current - menu->top + menu->offset, 2);
       else if (option (OPTBRAILLEFRIENDLY))
-	move (menu->current - menu->top + menu->offset, 0);
+	mutt_window_move (MuttIndexWindow, menu->current - menu->top + menu->offset, 0);
       else
-	move (menu->current - menu->top + menu->offset, COLS - 1);
+	mutt_window_move (MuttIndexWindow, menu->current - menu->top + menu->offset,
+                          MuttIndexWindow->cols - 1);
       mutt_refresh ();
 
 #if defined (USE_SLANG_CURSES) || defined (HAVE_RESIZETERM)
@@ -703,14 +702,14 @@ int mutt_index_menu (void)
 	tag = 1;
 
 	/* give visual indication that the next command is a tag- command */
-	mvaddstr (LINES - 1, 0, "tag-");
-	clrtoeol ();
+	mutt_window_mvaddstr (MuttMessageWindow, 0, 0, "tag-");
+	mutt_window_clrtoeol (MuttMessageWindow);
 
 	/* get the real command */
 	if ((op = km_dokey (MENU_MAIN)) == OP_TAG_PREFIX)
 	{
 	  /* abort tag sequence */
-	  CLEARLINE (LINES-1);
+          mutt_window_clearline (MuttMessageWindow, 0);
 	  continue;
 	}
       }
@@ -734,14 +733,14 @@ int mutt_index_menu (void)
 	tag = 1;
 
 	/* give visual indication that the next command is a tag- command */
-	mvaddstr (LINES - 1, 0, "tag-");
-	clrtoeol ();
+	mutt_window_mvaddstr (MuttMessageWindow, 0, 0, "tag-");
+	mutt_window_clrtoeol (MuttMessageWindow);
 
 	/* get the real command */
 	if ((op = km_dokey (MENU_MAIN)) == OP_TAG_PREFIX)
 	{
 	  /* abort tag sequence */
-	  CLEARLINE (LINES-1);
+	  mutt_window_clearline (MuttMessageWindow, 0);
 	  continue;
 	}
       }
@@ -869,10 +868,10 @@ int mutt_index_menu (void)
         CHECK_VISIBLE;
 	CHECK_READONLY;
         /* L10N: CHECK_ACL */
-	CHECK_ACL(M_ACL_DELETE, _("Cannot delete message(s)"));
+	CHECK_ACL(MUTT_ACL_DELETE, _("Cannot delete message(s)"));
 
 	CHECK_ATTACH;
-	mutt_pattern_func (M_DELETE, _("Delete messages matching: "));
+	mutt_pattern_func (MUTT_DELETE, _("Delete messages matching: "));
 	menu->redraw = REDRAW_INDEX | REDRAW_STATUS;
 	break;
 
@@ -909,7 +908,7 @@ int mutt_index_menu (void)
 	CHECK_IN_MAILBOX;
 	menu->oldcurrent = (Context->vcount && menu->current >= 0 && menu->current < Context->vcount) ?
 		CURHDR->index : -1;
-	if (mutt_pattern_func (M_LIMIT, _("Limit to messages matching: ")) == 0)
+	if (mutt_pattern_func (MUTT_LIMIT, _("Limit to messages matching: ")) == 0)
 	{
 	  if (menu->oldcurrent >= 0)
 	  {
@@ -943,7 +942,7 @@ int mutt_index_menu (void)
 	 break;
 	}
 
-	if (query_quadoption (OPT_QUIT, _("Quit Mutt?")) == M_YES)
+	if (query_quadoption (OPT_QUIT, _("Quit Mutt?")) == MUTT_YES)
 	{
 	  int check;
 
@@ -953,7 +952,7 @@ int mutt_index_menu (void)
 	    done = 1;
 	  else
 	  {
-	    if (check == M_NEW_MAIL || check == M_REOPENED)
+	    if (check == MUTT_NEW_MAIL || check == MUTT_REOPENED)
 	      update_index (menu, Context, check, oldcount, index_hint);
 
 	    menu->redraw = REDRAW_FULL; /* new mail arrived? */
@@ -1007,12 +1006,12 @@ int mutt_index_menu (void)
 	if (tag && !option (OPTAUTOTAG))
 	{
 	  for (j = 0; j < Context->vcount; j++)
-	    mutt_set_flag (Context, Context->hdrs[Context->v2r[j]], M_TAG, 0);
+	    mutt_set_flag (Context, Context->hdrs[Context->v2r[j]], MUTT_TAG, 0);
 	  menu->redraw = REDRAW_STATUS | REDRAW_INDEX;
 	}
 	else
 	{
-	  mutt_set_flag (Context, CURHDR, M_TAG, !CURHDR->tagged);
+	  mutt_set_flag (Context, CURHDR, MUTT_TAG, !CURHDR->tagged);
 
 	  Context->last_tag = CURHDR->tagged ? CURHDR :
 	    ((Context->last_tag == CURHDR && !CURHDR->tagged)
@@ -1033,7 +1032,7 @@ int mutt_index_menu (void)
 
 	CHECK_MSGCOUNT;
         CHECK_VISIBLE;
-	mutt_pattern_func (M_TAG, _("Tag messages matching: "));
+	mutt_pattern_func (MUTT_TAG, _("Tag messages matching: "));
 	menu->redraw = REDRAW_INDEX | REDRAW_STATUS;
 	break;
 
@@ -1043,9 +1042,9 @@ int mutt_index_menu (void)
         CHECK_VISIBLE;
 	CHECK_READONLY;
         /* L10N: CHECK_ACL */
-	CHECK_ACL(M_ACL_DELETE, _("Cannot undelete message(s)"));
+	CHECK_ACL(MUTT_ACL_DELETE, _("Cannot undelete message(s)"));
 
-	if (mutt_pattern_func (M_UNDELETE, _("Undelete messages matching: ")) == 0)
+	if (mutt_pattern_func (MUTT_UNDELETE, _("Undelete messages matching: ")) == 0)
 	  menu->redraw = REDRAW_INDEX | REDRAW_STATUS;
 	break;
 
@@ -1053,7 +1052,7 @@ int mutt_index_menu (void)
 
 	CHECK_MSGCOUNT;
         CHECK_VISIBLE;
-	if (mutt_pattern_func (M_UNTAG, _("Untag messages matching: ")) == 0)
+	if (mutt_pattern_func (MUTT_UNTAG, _("Untag messages matching: ")) == 0)
 	  menu->redraw = REDRAW_INDEX | REDRAW_STATUS;
 	break;
 
@@ -1063,12 +1062,12 @@ int mutt_index_menu (void)
 
 #ifdef USE_IMAP
       case OP_MAIN_IMAP_FETCH:
-	if (Context && Context->magic == M_IMAP)
+	if (Context && Context->magic == MUTT_IMAP)
 	  imap_check_mailbox (Context, &index_hint, 1);
         break;
 
       case OP_MAIN_IMAP_LOGOUT_ALL:
-	if (Context && Context->magic == M_IMAP)
+	if (Context && Context->magic == MUTT_IMAP)
 	{
 	  if (mx_close_mailbox (Context, &index_hint) != 0)
 	  {
@@ -1125,7 +1124,7 @@ int mutt_index_menu (void)
 	      }
 	    set_option (OPTSEARCHINVALID);
 	  }
-	  else if (check == M_NEW_MAIL || check == M_REOPENED)
+	  else if (check == MUTT_NEW_MAIL || check == MUTT_REOPENED)
 	    update_index (menu, Context, check, oldcount, index_hint);
 
 	  /*
@@ -1193,7 +1192,7 @@ int mutt_index_menu (void)
 	  }
 	  if (!buf[0])
 	  {
-	    CLEARLINE (LINES-1);
+            mutt_window_clearline (MuttMessageWindow, 0);
 	    break;
 	  }
 	}
@@ -1219,7 +1218,7 @@ int mutt_index_menu (void)
 
 	  if ((check = mx_close_mailbox (Context, &index_hint)) != 0)
 	  {
-	    if (check == M_NEW_MAIL || check == M_REOPENED)
+	    if (check == MUTT_NEW_MAIL || check == MUTT_REOPENED)
 	      update_index (menu, Context, check, oldcount, index_hint);
 
 	    set_option (OPTSEARCHINVALID);
@@ -1241,7 +1240,7 @@ int mutt_index_menu (void)
 
 	if ((Context = mx_open_mailbox (buf,
 					(option (OPTREADONLY) || op == OP_MAIN_CHANGE_FOLDER_READONLY) ?
-					M_READONLY : 0, NULL)) != NULL)
+					MUTT_READONLY : 0, NULL)) != NULL)
 	{
 	  menu->current = ci_first_message ();
 	}
@@ -1300,7 +1299,7 @@ int mutt_index_menu (void)
 
 	if ((menu->menu == MENU_MAIN)
 	    && (query_quadoption (OPT_QUIT,
-				  _("Exit Mutt without saving?")) == M_YES))
+				  _("Exit Mutt without saving?")) == MUTT_YES))
 	{
 	  if (Context)
 	  {
@@ -1351,7 +1350,7 @@ int mutt_index_menu (void)
         CHECK_VISIBLE;
 	CHECK_READONLY;
         /* L10N: CHECK_ACL */
-	CHECK_ACL(M_ACL_DELETE, _("Cannot link threads"));
+	CHECK_ACL(MUTT_ACL_DELETE, _("Cannot link threads"));
 
         if ((Sort & SORT_MASK) != SORT_THREADS)
 	  mutt_error _("Threading is not enabled.");
@@ -1632,7 +1631,7 @@ int mutt_index_menu (void)
         CHECK_VISIBLE;
 	CHECK_READONLY;
         /* L10N: CHECK_ACL */
-	CHECK_ACL(M_ACL_WRITE, _("Cannot flag message"));
+	CHECK_ACL(MUTT_ACL_WRITE, _("Cannot flag message"));
 
         if (tag)
         {
@@ -1640,14 +1639,14 @@ int mutt_index_menu (void)
 	  {
 	    if (Context->hdrs[Context->v2r[j]]->tagged)
 	      mutt_set_flag (Context, Context->hdrs[Context->v2r[j]],
-			     M_FLAG, !Context->hdrs[Context->v2r[j]]->flagged);
+			     MUTT_FLAG, !Context->hdrs[Context->v2r[j]]->flagged);
 	  }
 
 	  menu->redraw |= REDRAW_INDEX;
 	}
         else
         {
-	  mutt_set_flag (Context, CURHDR, M_FLAG, !CURHDR->flagged);
+	  mutt_set_flag (Context, CURHDR, MUTT_FLAG, !CURHDR->flagged);
 	  if (option (OPTRESOLVE))
 	  {
 	    if ((menu->current = ci_next_undeleted (menu->current)) == -1)
@@ -1670,7 +1669,7 @@ int mutt_index_menu (void)
         CHECK_VISIBLE;
 	CHECK_READONLY;
         /* L10N: CHECK_ACL */
-	CHECK_ACL(M_ACL_SEEN, _("Cannot toggle new"));
+	CHECK_ACL(MUTT_ACL_SEEN, _("Cannot toggle new"));
 
 	if (tag)
 	{
@@ -1680,9 +1679,9 @@ int mutt_index_menu (void)
 	    {
 	      if (Context->hdrs[Context->v2r[j]]->read ||
 		  Context->hdrs[Context->v2r[j]]->old)
-		mutt_set_flag (Context, Context->hdrs[Context->v2r[j]], M_NEW, 1);
+		mutt_set_flag (Context, Context->hdrs[Context->v2r[j]], MUTT_NEW, 1);
 	      else
-		mutt_set_flag (Context, Context->hdrs[Context->v2r[j]], M_READ, 1);
+		mutt_set_flag (Context, Context->hdrs[Context->v2r[j]], MUTT_READ, 1);
 	    }
 	  }
 	  menu->redraw = REDRAW_STATUS | REDRAW_INDEX;
@@ -1690,9 +1689,9 @@ int mutt_index_menu (void)
 	else
 	{
 	  if (CURHDR->read || CURHDR->old)
-	    mutt_set_flag (Context, CURHDR, M_NEW, 1);
+	    mutt_set_flag (Context, CURHDR, MUTT_NEW, 1);
 	  else
-	    mutt_set_flag (Context, CURHDR, M_READ, 1);
+	    mutt_set_flag (Context, CURHDR, MUTT_READ, 1);
 
 	  if (option (OPTRESOLVE))
 	  {
@@ -1784,7 +1783,7 @@ int mutt_index_menu (void)
 	CHECK_MSGCOUNT;
         CHECK_VISIBLE;
 	CHECK_READONLY;
-	/* CHECK_ACL(M_ACL_WRITE); */
+	/* CHECK_ACL(MUTT_ACL_WRITE); */
 
 	if (mutt_change_flag (tag ? NULL : CURHDR, (op == OP_MAIN_SET_FLAG)) == 0)
 	{
@@ -1925,20 +1924,20 @@ int mutt_index_menu (void)
         CHECK_VISIBLE;
 	CHECK_READONLY;
         /* L10N: CHECK_ACL */
-	CHECK_ACL(M_ACL_DELETE, _("Cannot delete message"));
+	CHECK_ACL(MUTT_ACL_DELETE, _("Cannot delete message"));
 
 	if (tag)
 	{
-	  mutt_tag_set_flag (M_DELETE, 1);
+	  mutt_tag_set_flag (MUTT_DELETE, 1);
 	  if (option (OPTDELETEUNTAG))
-	    mutt_tag_set_flag (M_TAG, 0);
+	    mutt_tag_set_flag (MUTT_TAG, 0);
 	  menu->redraw = REDRAW_INDEX;
 	}
 	else
 	{
-	  mutt_set_flag (Context, CURHDR, M_DELETE, 1);
+	  mutt_set_flag (Context, CURHDR, MUTT_DELETE, 1);
 	  if (option (OPTDELETEUNTAG))
-	    mutt_set_flag (Context, CURHDR, M_TAG, 0);
+	    mutt_set_flag (Context, CURHDR, MUTT_TAG, 0);
 	  if (option (OPTRESOLVE))
 	  {
 	    if ((menu->current = ci_next_undeleted (menu->current)) == -1)
@@ -1967,15 +1966,15 @@ int mutt_index_menu (void)
         CHECK_VISIBLE;
 	CHECK_READONLY;
         /* L10N: CHECK_ACL */
-	CHECK_ACL(M_ACL_DELETE, _("Cannot delete message(s)"));
+	CHECK_ACL(MUTT_ACL_DELETE, _("Cannot delete message(s)"));
 
-	rc = mutt_thread_set_flag (CURHDR, M_DELETE, 1,
+	rc = mutt_thread_set_flag (CURHDR, MUTT_DELETE, 1,
 				   op == OP_DELETE_THREAD ? 0 : 1);
 
 	if (rc != -1)
 	{
 	  if (option (OPTDELETEUNTAG))
-	    mutt_thread_set_flag (CURHDR, M_TAG, 0,
+	    mutt_thread_set_flag (CURHDR, MUTT_TAG, 0,
 				  op == OP_DELETE_THREAD ? 0 : 1);
 	  if (option (OPTRESOLVE))
 	    if ((menu->current = ci_next_undeleted (menu->current)) == -1)
@@ -2009,7 +2008,7 @@ int mutt_index_menu (void)
 	CHECK_READONLY;
 	CHECK_ATTACH;
         /* L10N: CHECK_ACL */
-	CHECK_ACL(M_ACL_INSERT, _("Cannot edit message"));
+	CHECK_ACL(MUTT_ACL_INSERT, _("Cannot edit message"));
 
 	if (option (OPTPGPAUTODEC) && (tag || !(CURHDR->security & PGP_TRADITIONAL_CHECKED)))
 	  mutt_check_traditional_pgp (tag ? NULL : CURHDR, &menu->redraw);
@@ -2107,7 +2106,7 @@ int mutt_index_menu (void)
 	/* in an IMAP folder index with imap_peek=no, piping could change
 	 * new or old messages status to read. Redraw what's needed.
 	 */
-	if (Context->magic == M_IMAP && !option (OPTIMAPPEEK))
+	if (Context->magic == MUTT_IMAP && !option (OPTIMAPPEEK))
 	{
 	  menu->redraw = (tag ? REDRAW_INDEX : REDRAW_CURRENT) | REDRAW_STATUS;
 	}
@@ -2126,7 +2125,7 @@ int mutt_index_menu (void)
 	/* in an IMAP folder index with imap_peek=no, printing could change
 	 * new or old messages status to read. Redraw what's needed.
 	 */
-	if (Context->magic == M_IMAP && !option (OPTIMAPPEEK))
+	if (Context->magic == MUTT_IMAP && !option (OPTIMAPPEEK))
 	{
 	  menu->redraw = (tag ? REDRAW_INDEX : REDRAW_CURRENT) | REDRAW_STATUS;
 	}
@@ -2141,9 +2140,9 @@ int mutt_index_menu (void)
 	CHECK_VISIBLE;
 	CHECK_READONLY;
         /* L10N: CHECK_ACL */
-	CHECK_ACL(M_ACL_SEEN, _("Cannot mark message(s) as read"));
+	CHECK_ACL(MUTT_ACL_SEEN, _("Cannot mark message(s) as read"));
 
-	rc = mutt_thread_set_flag (CURHDR, M_READ, 1,
+	rc = mutt_thread_set_flag (CURHDR, MUTT_READ, 1,
 				   op == OP_MAIN_READ_THREAD ? 0 : 1);
 
 	if (rc != -1)
@@ -2212,7 +2211,7 @@ int mutt_index_menu (void)
 
 	CHECK_MSGCOUNT;
         CHECK_VISIBLE;
-	rc = mutt_thread_set_flag (CURHDR, M_TAG, !CURHDR->tagged,
+	rc = mutt_thread_set_flag (CURHDR, MUTT_TAG, !CURHDR->tagged,
 				   op == OP_TAG_THREAD ? 0 : 1);
 
 	if (rc != -1)
@@ -2237,16 +2236,16 @@ int mutt_index_menu (void)
         CHECK_VISIBLE;
 	CHECK_READONLY;
         /* L10N: CHECK_ACL */
-	CHECK_ACL(M_ACL_DELETE, _("Cannot undelete message"));
+	CHECK_ACL(MUTT_ACL_DELETE, _("Cannot undelete message"));
 
 	if (tag)
 	{
-	  mutt_tag_set_flag (M_DELETE, 0);
+	  mutt_tag_set_flag (MUTT_DELETE, 0);
 	  menu->redraw = REDRAW_INDEX;
 	}
 	else
 	{
-	  mutt_set_flag (Context, CURHDR, M_DELETE, 0);
+	  mutt_set_flag (Context, CURHDR, MUTT_DELETE, 0);
 	  if (option (OPTRESOLVE) && menu->current < Context->vcount - 1)
 	  {
 	    menu->current++;
@@ -2265,9 +2264,9 @@ int mutt_index_menu (void)
         CHECK_VISIBLE;
 	CHECK_READONLY;
         /* L10N: CHECK_ACL */
-	CHECK_ACL(M_ACL_DELETE, _("Cannot undelete message(s)"));
+	CHECK_ACL(MUTT_ACL_DELETE, _("Cannot undelete message(s)"));
 
-	rc = mutt_thread_set_flag (CURHDR, M_DELETE, 0,
+	rc = mutt_thread_set_flag (CURHDR, MUTT_DELETE, 0,
 				   op == OP_UNDELETE_THREAD ? 0 : 1);
 
 	if (rc != -1)
@@ -2339,7 +2338,7 @@ void mutt_set_header_color (CONTEXT *ctx, HEADER *curhdr)
     return;
 
   for (color = ColorIndexList; color; color = color->next)
-   if (mutt_pattern_exec (color->color_pattern, M_MATCH_FULL_ADDRESS, ctx, curhdr))
+   if (mutt_pattern_exec (color->color_pattern, MUTT_MATCH_FULL_ADDRESS, ctx, curhdr))
    {
       curhdr->pair = color->pair;
       return;
