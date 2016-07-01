@@ -29,6 +29,9 @@
 #include "copy.h"
 #include "keymap.h"
 #include "url.h"
+#ifdef USE_SIDEBAR
+#include "sidebar.h"
+#endif
 
 #ifdef USE_IMAP
 #include "imap.h"
@@ -57,6 +60,30 @@
 #include <ctype.h>
 #include <utime.h>
 
+static struct mx_ops* mx_get_ops (int magic)
+{
+  switch (magic)
+  {
+#ifdef USE_IMAP
+    case MUTT_IMAP:
+      return &mx_imap_ops;
+#endif
+    case MUTT_MAILDIR:
+      return &mx_maildir_ops;
+    case MUTT_MBOX:
+      return &mx_mbox_ops;
+    case MUTT_MH:
+      return &mx_mh_ops;
+    case MUTT_MMDF:
+      return &mx_mmdf_ops;
+#ifdef USE_POP
+    case MUTT_POP:
+      return &mx_pop_ops;
+#endif
+    default:
+      return NULL;
+  }
+}
 
 #define mutt_is_spool(s)  (mutt_strcmp (Spoolfile, s) == 0)
 
@@ -115,7 +142,7 @@ retry_lock:
       
       snprintf(msg, sizeof(msg), _("Lock count exceeded, remove lock for %s?"),
 	       path);
-      if(retry && mutt_yesorno(msg, M_YES) == M_YES)
+      if(retry && mutt_yesorno(msg, MUTT_YES) == MUTT_YES)
       {
 	flags |= DL_FL_FORCE;
 	retry--;
@@ -352,12 +379,12 @@ int mx_get_magic (const char *path)
 
 #ifdef USE_IMAP
   if(mx_is_imap(path))
-    return M_IMAP;
+    return MUTT_IMAP;
 #endif /* USE_IMAP */
 
 #ifdef USE_POP
   if (mx_is_pop (path))
-    return M_POP;
+    return MUTT_POP;
 #endif /* USE_POP */
 
   if (stat (path, &st) == -1)
@@ -371,19 +398,19 @@ int mx_get_magic (const char *path)
   {
     /* check for maildir-style mailbox */
     if (mx_is_maildir (path))
-      return M_MAILDIR;
+      return MUTT_MAILDIR;
 
     /* check for mh-style mailbox */
     if (mx_is_mh (path))
-      return M_MH;
+      return MUTT_MH;
   }
   else if (st.st_size == 0)
   {
     /* hard to tell what zero-length files are, so assume the default magic */
-    if (DefaultMagic == M_MBOX || DefaultMagic == M_MMDF)
+    if (DefaultMagic == MUTT_MBOX || DefaultMagic == MUTT_MMDF)
       return (DefaultMagic);
     else
-      return (M_MBOX);
+      return (MUTT_MBOX);
   }
   else if ((f = fopen (path, "r")) != NULL)
   {
@@ -391,9 +418,9 @@ int mx_get_magic (const char *path)
 
     fgets (tmp, sizeof (tmp), f);
     if (mutt_strncmp ("From ", tmp, 5) == 0)
-      magic = M_MBOX;
+      magic = MUTT_MBOX;
     else if (mutt_strcmp (MMDF_SEP, tmp) == 0)
-      magic = M_MMDF;
+      magic = MUTT_MMDF;
     safe_fclose (&f);
 
     if (!option(OPTCHECKMBOXSIZE))
@@ -423,13 +450,13 @@ int mx_get_magic (const char *path)
 int mx_set_magic (const char *s)
 {
   if (ascii_strcasecmp (s, "mbox") == 0)
-    DefaultMagic = M_MBOX;
+    DefaultMagic = MUTT_MBOX;
   else if (ascii_strcasecmp (s, "mmdf") == 0)
-    DefaultMagic = M_MMDF;
+    DefaultMagic = MUTT_MMDF;
   else if (ascii_strcasecmp (s, "mh") == 0)
-    DefaultMagic = M_MH;
+    DefaultMagic = MUTT_MH;
   else if (ascii_strcasecmp (s, "maildir") == 0)
-    DefaultMagic = M_MAILDIR;
+    DefaultMagic = MUTT_MAILDIR;
   else
     return (-1);
 
@@ -479,7 +506,7 @@ static int mx_open_mailbox_append (CONTEXT *ctx, int flags)
   {
     ctx->magic = DefaultMagic;
 
-    if (ctx->magic == M_MH || ctx->magic == M_MAILDIR)
+    if (ctx->magic == MUTT_MH || ctx->magic == MUTT_MAILDIR)
     {
       char tmp[_POSIX_PATH_MAX];
 
@@ -489,7 +516,7 @@ static int mx_open_mailbox_append (CONTEXT *ctx, int flags)
 	return (-1);
       }
 
-      if (ctx->magic == M_MAILDIR)
+      if (ctx->magic == MUTT_MAILDIR)
       {
 	snprintf (tmp, sizeof (tmp), "%s/cur", ctx->path);
 	if (mkdir (tmp, S_IRWXU))
@@ -543,9 +570,9 @@ static int mx_open_mailbox_append (CONTEXT *ctx, int flags)
 
   switch (ctx->magic)
   {
-    case M_MBOX:
-    case M_MMDF:
-    if ((ctx->fp = safe_fopen (ctx->path, flags & M_NEWFOLDER ? "w" : "a")) == NULL ||
+    case MUTT_MBOX:
+    case MUTT_MMDF:
+    if ((ctx->fp = safe_fopen (ctx->path, flags & MUTT_NEWFOLDER ? "w" : "a")) == NULL ||
 	  mbox_lock_mailbox (ctx, 1, 1) != 0)
       {
 	if (!ctx->fp)
@@ -560,8 +587,8 @@ static int mx_open_mailbox_append (CONTEXT *ctx, int flags)
       fseek (ctx->fp, 0, 2);
       break;
 
-    case M_MH:
-    case M_MAILDIR:
+    case MUTT_MH:
+    case MUTT_MAILDIR:
       /* nothing to do */
       break;
 
@@ -572,14 +599,24 @@ static int mx_open_mailbox_append (CONTEXT *ctx, int flags)
   return 0;
 }
 
+/* close a mailbox opened in write-mode */
+static int mx_close_mailbox_append (CONTEXT *ctx)
+{
+  mx_unlock_file (ctx->path, fileno (ctx->fp), 1);
+  mutt_unblock_signals ();
+  mx_fastclose_mailbox (ctx);
+  return 0;
+}
+
 /*
  * open a mailbox and parse it
  *
  * Args:
- *	flags	M_NOSORT	do not sort mailbox
- *		M_APPEND	open mailbox for appending
- *		M_READONLY	open mailbox in read-only mode
- *		M_QUIET		only print error messages
+ *	flags	MUTT_NOSORT	do not sort mailbox
+ *		MUTT_APPEND	open mailbox for appending
+ *		MUTT_READONLY	open mailbox in read-only mode
+ *		MUTT_QUIET		only print error messages
+ *		MUTT_PEEK		revert atime where applicable
  *	ctx	if non-null, context struct to use
  */
 CONTEXT *mx_open_mailbox (const char *path, int flags, CONTEXT *pctx)
@@ -591,6 +628,8 @@ CONTEXT *mx_open_mailbox (const char *path, int flags, CONTEXT *pctx)
     ctx = safe_malloc (sizeof (CONTEXT));
   memset (ctx, 0, sizeof (CONTEXT));
   ctx->path = safe_strdup (path);
+  if (! (ctx->realpath = realpath (ctx->path, NULL)) )
+    ctx->realpath = safe_strdup (ctx->path);
 
   ctx->msgnotreadyet = -1;
   ctx->collapsed = 0;
@@ -598,12 +637,14 @@ CONTEXT *mx_open_mailbox (const char *path, int flags, CONTEXT *pctx)
   for (rc=0; rc < RIGHTSMAX; rc++)
     mutt_bit_set(ctx->rights,rc);
 
-  if (flags & M_QUIET)
+  if (flags & MUTT_QUIET)
     ctx->quiet = 1;
-  if (flags & M_READONLY)
+  if (flags & MUTT_READONLY)
     ctx->readonly = 1;
+  if (flags & MUTT_PEEK)
+    ctx->peekonly = 1;
 
-  if (flags & (M_APPEND|M_NEWFOLDER))
+  if (flags & (MUTT_APPEND|MUTT_NEWFOLDER))
   {
     if (mx_open_mailbox_append (ctx, flags) != 0)
     {
@@ -616,15 +657,15 @@ CONTEXT *mx_open_mailbox (const char *path, int flags, CONTEXT *pctx)
   }
 
   ctx->magic = mx_get_magic (path);
-  
-  if(ctx->magic == 0)
-    mutt_error (_("%s is not a mailbox."), path);
+  ctx->mx_ops = mx_get_ops (ctx->magic);
 
-  if(ctx->magic == -1)
-    mutt_perror(path);
-  
-  if(ctx->magic <= 0)
+  if (ctx->magic <= 0 || !ctx->mx_ops)
   {
+    if (ctx->magic == 0 || !ctx->mx_ops)
+      mutt_error (_("%s is not a mailbox."), path);
+    else if (ctx->magic == -1)
+      mutt_perror(path);
+
     mx_fastclose_mailbox (ctx);
     if (!pctx)
       FREE (&ctx);
@@ -641,41 +682,11 @@ CONTEXT *mx_open_mailbox (const char *path, int flags, CONTEXT *pctx)
   if (!ctx->quiet)
     mutt_message (_("Reading %s..."), ctx->path);
 
-  switch (ctx->magic)
-  {
-    case M_MH:
-      rc = mh_read_dir (ctx, NULL);
-      break;
-
-    case M_MAILDIR:
-      rc = maildir_read_dir (ctx);
-      break;
-
-    case M_MMDF:
-    case M_MBOX:
-      rc = mbox_open_mailbox (ctx);
-      break;
-
-#ifdef USE_IMAP
-    case M_IMAP:
-      rc = imap_open_mailbox (ctx);
-      break;
-#endif /* USE_IMAP */
-
-#ifdef USE_POP
-    case M_POP:
-      rc = pop_open_mailbox (ctx);
-      break;
-#endif /* USE_POP */
-
-    default:
-      rc = -1;
-      break;
-  }
+  rc = ctx->mx_ops->open(ctx);
 
   if (rc == 0)
   {
-    if ((flags & M_NOSORT) == 0)
+    if ((flags & MUTT_NOSORT) == 0)
     {
       /* avoid unnecessary work since the mailbox is completely unthreaded
 	 to begin with */
@@ -701,16 +712,25 @@ CONTEXT *mx_open_mailbox (const char *path, int flags, CONTEXT *pctx)
 void mx_fastclose_mailbox (CONTEXT *ctx)
 {
   int i;
+  struct utimbuf ut;
 
   if(!ctx) 
     return;
 
+  /* fix up the times so buffy won't get confused */
+  if (ctx->peekonly && ctx->path && (ctx->mtime > ctx->atime)) {
+    ut.actime  = ctx->atime;
+    ut.modtime = ctx->mtime;
+    utime (ctx->path, &ut);
+  }
+
   /* never announce that a mailbox we've just left has new mail. #3290
    * XXX: really belongs in mx_close_mailbox, but this is a nice hook point */
-  mutt_buffy_setnotified(ctx->path);
+  if (!ctx->peekonly)
+    mutt_buffy_setnotified(ctx->path);
 
-  if (ctx->mx_close)
-    ctx->mx_close (ctx);
+  if (ctx->mx_ops)
+    ctx->mx_ops->close (ctx);
 
   if (ctx->subj_hash)
     hash_destroy (&ctx->subj_hash, NULL);
@@ -722,6 +742,7 @@ void mx_fastclose_mailbox (CONTEXT *ctx)
   FREE (&ctx->hdrs);
   FREE (&ctx->v2r);
   FREE (&ctx->path);
+  FREE (&ctx->realpath);
   FREE (&ctx->pattern);
   if (ctx->limit_pattern) 
     mutt_pattern_free (&ctx->limit_pattern);
@@ -740,27 +761,27 @@ static int sync_mailbox (CONTEXT *ctx, int *index_hint)
 
   switch (ctx->magic)
   {
-    case M_MBOX:
-    case M_MMDF:
+    case MUTT_MBOX:
+    case MUTT_MMDF:
       rc = mbox_sync_mailbox (ctx, index_hint);
       if (option(OPTCHECKMBOXSIZE))
 	tmp = mutt_find_mailbox (ctx->path);
       break;
       
-    case M_MH:
-    case M_MAILDIR:
+    case MUTT_MH:
+    case MUTT_MAILDIR:
       rc = mh_sync_mailbox (ctx, index_hint);
       break;
       
 #ifdef USE_IMAP
-    case M_IMAP:
+    case MUTT_IMAP:
       /* extra argument means EXPUNGE */
       rc = imap_sync_mailbox (ctx, 1, index_hint);
       break;
 #endif /* USE_IMAP */
 
 #ifdef USE_POP
-    case M_POP:
+    case MUTT_POP:
       rc = pop_sync_mailbox (ctx, index_hint);
       break;
 #endif /* USE_POP */
@@ -800,8 +821,8 @@ int mx_close_mailbox (CONTEXT *ctx, int *index_hint)
   if (ctx->append)
   {
     /* mailbox was opened in write-mode */
-    if (ctx->magic == M_MBOX || ctx->magic == M_MMDF)
-      mbox_close_mailbox (ctx);
+    if (ctx->magic == MUTT_MBOX || ctx->magic == MUTT_MMDF)
+      mx_close_mailbox_append (ctx);
     else
       mx_fastclose_mailbox (ctx);
     return 0;
@@ -812,13 +833,19 @@ int mx_close_mailbox (CONTEXT *ctx, int *index_hint)
     if (!ctx->hdrs[i]->deleted && ctx->hdrs[i]->read 
         && !(ctx->hdrs[i]->flagged && option (OPTKEEPFLAGGED)))
       read_msgs++;
+#ifdef USE_SIDEBAR
+    if (ctx->hdrs[i]->deleted && !ctx->hdrs[i]->read)
+      ctx->unread--;
+    if (ctx->hdrs[i]->deleted && ctx->hdrs[i]->flagged)
+      ctx->flagged--;
+#endif
   }
 
-  if (read_msgs && quadoption (OPT_MOVE) != M_NO)
+  if (read_msgs && quadoption (OPT_MOVE) != MUTT_NO)
   {
     char *p;
 
-    if ((p = mutt_find_hook (M_MBOXHOOK, ctx->path)))
+    if ((p = mutt_find_hook (MUTT_MBOXHOOK, ctx->path)))
     {
       isSpool = 1;
       strfcpy (mbox, p, sizeof (mbox));
@@ -845,7 +872,7 @@ int mx_close_mailbox (CONTEXT *ctx, int *index_hint)
    * There is no point in asking whether or not to purge if we are
    * just marking messages as "trash".
    */
-  if (ctx->deleted && !(ctx->magic == M_MAILDIR && option (OPTMAILDIRTRASH)))
+  if (ctx->deleted && !(ctx->magic == MUTT_MAILDIR && option (OPTMAILDIRTRASH)))
   {
     snprintf (buf, sizeof (buf), ctx->deleted == 1
 	     ? _("Purge %d deleted message?") : _("Purge %d deleted messages?"),
@@ -862,7 +889,7 @@ int mx_close_mailbox (CONTEXT *ctx, int *index_hint)
     for (i = 0; i < ctx->msgcount; i++)
     {
       if (!ctx->hdrs[i]->deleted && !ctx->hdrs[i]->old && !ctx->hdrs[i]->read)
-	mutt_set_flag (ctx, ctx->hdrs[i], M_OLD, 1);
+	mutt_set_flag (ctx, ctx->hdrs[i], MUTT_OLD, 1);
     }
   }
 
@@ -875,7 +902,7 @@ int mx_close_mailbox (CONTEXT *ctx, int *index_hint)
     /* try to use server-side copy first */
     i = 1;
     
-    if (ctx->magic == M_IMAP && mx_is_imap (mbox))
+    if (ctx->magic == MUTT_IMAP && mx_is_imap (mbox))
     {
       /* tag messages for moving, and clear old tags, if any */
       for (i = 0; i < ctx->msgcount; i++)
@@ -898,7 +925,7 @@ int mx_close_mailbox (CONTEXT *ctx, int *index_hint)
     else /* use regular append-copy mode */
 #endif
     {
-      if (mx_open_mailbox (mbox, M_APPEND, &f) == NULL)
+      if (mx_open_mailbox (mbox, MUTT_APPEND, &f) == NULL)
       {
 	ctx->closing = 0;
 	return -1;
@@ -911,7 +938,7 @@ int mx_close_mailbox (CONTEXT *ctx, int *index_hint)
         {
 	  if (mutt_append_message (&f, ctx, ctx->hdrs[i], 0, CH_UPDATE_LEN) == 0)
 	  {
-	    mutt_set_flag (ctx, ctx->hdrs[i], M_DELETE, 1);
+	    mutt_set_flag (ctx, ctx->hdrs[i], MUTT_DELETE, 1);
 	  }
 	  else
 	  {
@@ -930,7 +957,7 @@ int mx_close_mailbox (CONTEXT *ctx, int *index_hint)
   {
     if (!ctx->quiet)
       mutt_message _("Mailbox is unchanged.");
-    if (ctx->magic == M_MBOX || ctx->magic == M_MMDF)
+    if (ctx->magic == MUTT_MBOX || ctx->magic == MUTT_MMDF)
       mbox_reset_atime (ctx, NULL);
     mx_fastclose_mailbox (ctx);
     return 0;
@@ -938,7 +965,7 @@ int mx_close_mailbox (CONTEXT *ctx, int *index_hint)
   
 #ifdef USE_IMAP
   /* allow IMAP to preserve the deleted flag across sessions */
-  if (ctx->magic == M_IMAP)
+  if (ctx->magic == MUTT_IMAP)
   {
     if ((check = imap_sync_mailbox (ctx, purge, index_hint)) != 0)
     {
@@ -977,9 +1004,14 @@ int mx_close_mailbox (CONTEXT *ctx, int *index_hint)
   }
 
   if (ctx->msgcount == ctx->deleted &&
-      (ctx->magic == M_MMDF || ctx->magic == M_MBOX) &&
+      (ctx->magic == MUTT_MMDF || ctx->magic == MUTT_MBOX) &&
       !mutt_is_spool(ctx->path) && !option (OPTSAVEEMPTY))
     mx_unlink_empty (ctx->path);
+
+#ifdef USE_SIDEBAR
+  ctx->msgcount -= ctx->deleted;
+  mutt_sb_set_buffystats (ctx);
+#endif
 
   mx_fastclose_mailbox (ctx);
 
@@ -1006,7 +1038,7 @@ void mx_update_tables(CONTEXT *ctx, int committing)
   for (i = 0, j = 0; i < ctx->msgcount; i++)
   {
     if ((committing && (!ctx->hdrs[i]->deleted || 
-			(ctx->magic == M_MAILDIR && option (OPTMAILDIRTRASH)))) ||
+			(ctx->magic == MUTT_MAILDIR && option (OPTMAILDIRTRASH)))) ||
 	(!committing && ctx->hdrs[i]->active))
     {
       if (i != j)
@@ -1028,7 +1060,7 @@ void mx_update_tables(CONTEXT *ctx, int committing)
       else if (ctx->hdrs[j]->changed)
 	ctx->changed++;
       
-      if (!committing || (ctx->magic == M_MAILDIR && option (OPTMAILDIRTRASH)))
+      if (!committing || (ctx->magic == MUTT_MAILDIR && option (OPTMAILDIRTRASH)))
       {
 	if (ctx->hdrs[j]->deleted)
 	  ctx->deleted++;
@@ -1049,7 +1081,7 @@ void mx_update_tables(CONTEXT *ctx, int committing)
     }
     else
     {
-      if (ctx->magic == M_MH || ctx->magic == M_MAILDIR)
+      if (ctx->magic == MUTT_MH || ctx->magic == MUTT_MAILDIR)
 	ctx->size -= (ctx->hdrs[i]->content->length +
 		      ctx->hdrs[i]->content->offset -
 		      ctx->hdrs[i]->content->hdr_offset);
@@ -1119,12 +1151,12 @@ int mx_sync_mailbox (CONTEXT *ctx, int *index_hint)
 	      ctx->deleted);
     if ((purge = query_quadoption (OPT_DELETE, buf)) < 0)
       return (-1);
-    else if (purge == M_NO)
+    else if (purge == MUTT_NO)
     {
       if (!ctx->changed)
 	return 0; /* nothing to do! */
       /* let IMAP servers hold on to D flags */
-      if (ctx->magic != M_IMAP)
+      if (ctx->magic != MUTT_IMAP)
       {
         for (i = 0 ; i < ctx->msgcount ; i++)
           ctx->hdrs[i]->deleted = 0;
@@ -1141,7 +1173,7 @@ int mx_sync_mailbox (CONTEXT *ctx, int *index_hint)
   deleted = ctx->deleted;
 
 #ifdef USE_IMAP
-  if (ctx->magic == M_IMAP)
+  if (ctx->magic == MUTT_IMAP)
     rc = imap_sync_mailbox (ctx, purge, index_hint);
   else
 #endif
@@ -1149,7 +1181,7 @@ int mx_sync_mailbox (CONTEXT *ctx, int *index_hint)
   if (rc == 0)
   {
 #ifdef USE_IMAP
-    if (ctx->magic == M_IMAP && !purge)
+    if (ctx->magic == MUTT_IMAP && !purge)
     {
       if (!ctx->quiet)
         mutt_message _("Mailbox checkpointed.");
@@ -1165,7 +1197,7 @@ int mx_sync_mailbox (CONTEXT *ctx, int *index_hint)
     mutt_sleep (0);
     
     if (ctx->msgcount == ctx->deleted &&
-	(ctx->magic == M_MBOX || ctx->magic == M_MMDF) &&
+	(ctx->magic == MUTT_MBOX || ctx->magic == MUTT_MMDF) &&
 	!mutt_is_spool (ctx->path) && !option (OPTSAVEEMPTY))
     {
       unlink (ctx->path);
@@ -1180,10 +1212,10 @@ int mx_sync_mailbox (CONTEXT *ctx, int *index_hint)
      * MH and maildir are safe.  mbox-style seems to need re-sorting,
      * at least with the new threading code.
      */
-    if (purge || (ctx->magic != M_MAILDIR && ctx->magic != M_MH))
+    if (purge || (ctx->magic != MUTT_MAILDIR && ctx->magic != MUTT_MH))
     {
       /* IMAP does this automatically after handling EXPUNGE */
-      if (ctx->magic != M_IMAP)
+      if (ctx->magic != MUTT_IMAP)
       {
 	mx_update_tables (ctx, 1);
 	mutt_sort_headers (ctx, 1); /* rethread from scratch */
@@ -1194,31 +1226,6 @@ int mx_sync_mailbox (CONTEXT *ctx, int *index_hint)
   return (rc);
 }
 
-
-/* {maildir,mh}_open_new_message are in mh.c. */
-
-static int mbox_open_new_message (MESSAGE *msg, CONTEXT *dest, HEADER *hdr)
-{
-  msg->fp = dest->fp;
-  return 0;
-}
-
-#ifdef USE_IMAP
-static int imap_open_new_message (MESSAGE *msg, CONTEXT *dest, HEADER *hdr)
-{
-  char tmp[_POSIX_PATH_MAX];
-
-  mutt_mktemp (tmp, sizeof (tmp));
-  if ((msg->fp = safe_fopen (tmp, "w")) == NULL)
-  {
-    mutt_perror (tmp);
-    return (-1);
-  }
-  msg->path = safe_strdup(tmp);
-  return 0;
-}
-#endif
-
 /* args:
  *	dest	destination mailbox
  *	hdr	message being copied (required for maildir support, because
@@ -1226,35 +1233,21 @@ static int imap_open_new_message (MESSAGE *msg, CONTEXT *dest, HEADER *hdr)
  */
 MESSAGE *mx_open_new_message (CONTEXT *dest, HEADER *hdr, int flags)
 {
-  MESSAGE *msg;
-  int (*func) (MESSAGE *, CONTEXT *, HEADER *);
+  /* TODO: Convert this to use dest->mx_ops after
+   * mx_open_mailbox_append() is changed to set mx_ops.
+   */
+  struct mx_ops *ops = mx_get_ops (dest->magic);
   ADDRESS *p = NULL;
+  MESSAGE *msg;
 
-  switch (dest->magic)
+  if (!ops || !ops->open_new_msg)
   {
-    case M_MMDF:
-    case M_MBOX:
-      func = mbox_open_new_message;
-      break;
-    case M_MAILDIR:
-      func = maildir_open_new_message;
-      break;
-    case M_MH:
-      func = mh_open_new_message;
-      break;
-#ifdef USE_IMAP
-    case M_IMAP:
-      func = imap_open_new_message;
-      break;
-#endif
-    default:
       dprint (1, (debugfile, "mx_open_new_message(): function unimplemented for mailbox type %d.\n",
-		  dest->magic));
-      return (NULL);
+              dest->magic));
+      return NULL;
   }
 
   msg = safe_calloc (1, sizeof (MESSAGE));
-  msg->magic = dest->magic;
   msg->write = 1;
 
   if (hdr)
@@ -1262,20 +1255,20 @@ MESSAGE *mx_open_new_message (CONTEXT *dest, HEADER *hdr, int flags)
     msg->flags.flagged = hdr->flagged;
     msg->flags.replied = hdr->replied;
     msg->flags.read    = hdr->read;
-    msg->flags.draft   = (flags & M_SET_DRAFT) ? 1 : 0;
+    msg->flags.draft   = (flags & MUTT_SET_DRAFT) ? 1 : 0;
     msg->received = hdr->received;
   }
 
   if(msg->received == 0)
     time(&msg->received);
-  
-  if (func (msg, dest, hdr) == 0)
+
+  if (ops->open_new_msg (msg, dest, hdr) == 0)
   {
-    if (dest->magic == M_MMDF)
+    if (dest->magic == MUTT_MMDF)
       fputs (MMDF_SEP, msg->fp);
 
-    if ((msg->magic == M_MBOX || msg->magic ==  M_MMDF) &&
-	flags & M_ADD_FROM)
+    if ((dest->magic == MUTT_MBOX || dest->magic ==  MUTT_MMDF) &&
+	flags & MUTT_ADD_FROM)
     {
       if (hdr)
       {
@@ -1297,131 +1290,53 @@ MESSAGE *mx_open_new_message (CONTEXT *dest, HEADER *hdr, int flags)
 }
 
 /* check for new mail */
-int mx_check_mailbox (CONTEXT *ctx, int *index_hint, int lock)
+int mx_check_mailbox (CONTEXT *ctx, int *index_hint)
 {
-  int rc;
+  struct mx_ops *ops;
 
-  if (ctx)
+  if (!ctx)
   {
-    if (ctx->locked) lock = 0;
-
-    switch (ctx->magic)
-    {
-      case M_MBOX:
-      case M_MMDF:
-
-	if (lock)
-	{
-	  mutt_block_signals ();
-	  if (mbox_lock_mailbox (ctx, 0, 0) == -1)
-	  {
-	    mutt_unblock_signals ();
-	    return M_LOCKED;
-	  }
-	}
-	
-	rc = mbox_check_mailbox (ctx, index_hint);
-
-	if (lock)
-	{
-	  mutt_unblock_signals ();
-	  mbox_unlock_mailbox (ctx);
-	}
-	
-	return rc;
-
-
-      case M_MH:
-	return (mh_check_mailbox (ctx, index_hint));
-      case M_MAILDIR:
-	return (maildir_check_mailbox (ctx, index_hint));
-
-#ifdef USE_IMAP
-      case M_IMAP:
-	/* caller expects that mailbox may change */
-        imap_allow_reopen (ctx);
-	rc = imap_check_mailbox (ctx, index_hint, 0);
-        imap_disallow_reopen (ctx);
-	return rc;
-#endif /* USE_IMAP */
-
-#ifdef USE_POP
-      case M_POP:
-	return (pop_check_mailbox (ctx, index_hint));
-#endif /* USE_POP */
-    }
+    dprint (1, (debugfile, "mx_check_mailbox: null or invalid context.\n"));
+    return -1;
   }
 
-  dprint (1, (debugfile, "mx_check_mailbox: null or invalid context.\n"));
-  return (-1);
+  ops = mx_get_ops (ctx->magic);
+  if (!ops)
+    return -1;
+
+  return ops->check (ctx, index_hint);
 }
 
 /* return a stream pointer for a message */
 MESSAGE *mx_open_message (CONTEXT *ctx, int msgno)
 {
+  struct mx_ops *ops = mx_get_ops (ctx->magic);
   MESSAGE *msg;
-  
-  msg = safe_calloc (1, sizeof (MESSAGE));
-  switch (msg->magic = ctx->magic)
+  int ret;
+
+  if (!ops || !ops->open_msg)
   {
-    case M_MBOX:
-    case M_MMDF:
-      msg->fp = ctx->fp;
-      break;
-
-    case M_MH:
-    case M_MAILDIR:
-    {
-      HEADER *cur = ctx->hdrs[msgno];
-      char path[_POSIX_PATH_MAX];
-      
-      snprintf (path, sizeof (path), "%s/%s", ctx->path, cur->path);
-      
-      if ((msg->fp = fopen (path, "r")) == NULL && errno == ENOENT &&
-	  ctx->magic == M_MAILDIR)
-	msg->fp = maildir_open_find_message (ctx->path, cur->path);
-      
-      if (msg->fp == NULL)
-      {
-	mutt_perror (path);
-	dprint (1, (debugfile, "mx_open_message: fopen: %s: %s (errno %d).\n",
-		    path, strerror (errno), errno));
-	FREE (&msg);
-      }
-    }
-    break;
-    
-#ifdef USE_IMAP
-    case M_IMAP:
-    {
-      if (imap_fetch_message (msg, ctx, msgno) != 0)
-	FREE (&msg);
-      break;
-    }
-#endif /* USE_IMAP */
-
-#ifdef USE_POP
-    case M_POP:
-    {
-      if (pop_fetch_message (msg, ctx, msgno) != 0)
-	FREE (&msg);
-      break;
-    }
-#endif /* USE_POP */
-
-    default:
-      dprint (1, (debugfile, "mx_open_message(): function not implemented for mailbox type %d.\n", ctx->magic));
-      FREE (&msg);
-      break;
+    dprint (1, (debugfile, "mx_open_message(): function not implemented for mailbox type %d.\n", ctx->magic));
+    return NULL;
   }
-  return (msg);
+
+  msg = safe_calloc (1, sizeof (MESSAGE));
+  ret = ops->open_msg (ctx, msg, msgno);
+  if (ret)
+    FREE (&msg);
+
+  return msg;
 }
 
 /* commit a message to a folder */
 
 int mx_commit_message (MESSAGE *msg, CONTEXT *ctx)
 {
+  struct mx_ops *ops = mx_get_ops (ctx->magic);
   int r = 0;
+
+  if (!ops || !ops->commit_msg)
+    return -1;
 
   if (!(msg->write && ctx->append))
   {
@@ -1430,45 +1345,9 @@ int mx_commit_message (MESSAGE *msg, CONTEXT *ctx)
     return -1;
   }
 
-  switch (msg->magic)
-  {
-    case M_MMDF:
-    {
-      if (fputs (MMDF_SEP, msg->fp) == EOF)
-	r = -1;
-      break;
-    }
-    
-    case M_MBOX:
-    {
-      if (fputc ('\n', msg->fp) == EOF)
-	r = -1;
-      break;
-    }
-
-#ifdef USE_IMAP
-    case M_IMAP:
-    {
-      if ((r = safe_fclose (&msg->fp)) == 0)
-	r = imap_append_message (ctx, msg);
-      break;
-    }
-#endif
-    
-    case M_MAILDIR:
-    {
-      r = maildir_commit_message (ctx, msg, NULL);
-      break;
-    }
-    
-    case M_MH:
-    {
-      r = mh_commit_message (ctx, msg, NULL);
-      break;
-    }
-  }
+  r = ops->commit_msg (ctx, msg);
   
-  if (r == 0 && (ctx->magic == M_MBOX || ctx->magic == M_MMDF)
+  if (r == 0 && (ctx->magic == MUTT_MBOX || ctx->magic == MUTT_MMDF)
       && (fflush (msg->fp) == EOF || fsync (fileno (msg->fp)) == -1))
   {
     mutt_perror _("Can't write message");
@@ -1479,22 +1358,18 @@ int mx_commit_message (MESSAGE *msg, CONTEXT *ctx)
 }
 
 /* close a pointer to a message */
-int mx_close_message (MESSAGE **msg)
+int mx_close_message (CONTEXT *ctx, MESSAGE **msg)
 {
+  struct mx_ops *ops = mx_get_ops (ctx->magic);
   int r = 0;
 
-  if ((*msg)->magic == M_MH || (*msg)->magic == M_MAILDIR
-      || (*msg)->magic == M_IMAP || (*msg)->magic == M_POP)
-  {
-    r = safe_fclose (&(*msg)->fp);
-  }
-  else
-    (*msg)->fp = NULL;
+  if (ops && ops->close_msg)
+    r = ops->close_msg (ctx, *msg);
 
   if ((*msg)->path)
   {
     dprint (1, (debugfile, "mx_close_message (): unlinking %s\n",
-		(*msg)->path));
+            (*msg)->path));
     unlink ((*msg)->path);
     FREE (&(*msg)->path);
   }
@@ -1611,12 +1486,12 @@ int mx_check_empty (const char *path)
 {
   switch (mx_get_magic (path))
   {
-    case M_MBOX:
-    case M_MMDF:
+    case MUTT_MBOX:
+    case MUTT_MMDF:
       return mbox_check_empty (path);
-    case M_MH:
+    case MUTT_MH:
       return mh_check_empty (path);
-    case M_MAILDIR:
+    case MUTT_MAILDIR:
       return maildir_check_empty (path);
     default:
       errno = EINVAL;

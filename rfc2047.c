@@ -120,7 +120,7 @@ int convert_nonmime_string (char **ps)
   }
   mutt_convert_string (ps,
       (const char *)mutt_get_default_charset (),
-      Charset, M_ICONV_HOOK_FROM);
+      Charset, MUTT_ICONV_HOOK_FROM);
   return -1;
 }
 
@@ -410,7 +410,7 @@ static int rfc2047_encode (ICONV_CONST char *d, size_t dlen, int col,
   int ret = 0;
   char *buf;
   size_t bufpos, buflen;
-  char *u, *t0, *t1, *t;
+  char *u = NULL, *t0, *t1, *t;
   char *s0, *s1;
   size_t ulen, r, n, wlen;
   encoder_t encoder;
@@ -423,7 +423,7 @@ static int rfc2047_encode (ICONV_CONST char *d, size_t dlen, int col,
   {
     ret = 1; 
     icode = 0;
-    u = safe_malloc ((ulen = dlen) + 1);
+    safe_realloc (&u, (ulen = dlen) + 1);
     memcpy (u, d, dlen);
     u[ulen] = 0;
   }
@@ -713,7 +713,7 @@ static int rfc2047_decode_word (char *d, const char *s, size_t len)
   }
   
   if (charset)
-    mutt_convert_string (&d0, charset, Charset, M_ICONV_HOOK_FROM);
+    mutt_convert_string (&d0, charset, Charset, MUTT_ICONV_HOOK_FROM);
   mutt_filter_unprintable (&d0);
   strfcpy (d, d0, len);
   rv = 0;
