@@ -519,6 +519,7 @@ int mutt_index_menu (void)
   menu->color = index_color;
   menu->current = ci_first_message ();
   menu->help = mutt_compile_help (helpstr, sizeof (helpstr), MENU_MAIN, IndexHelp);
+  mutt_push_current_menu (menu);
 
   if (!attach_msg)
     mutt_buffy_check(1); /* force the buffy check after we enter the folder */
@@ -612,14 +613,14 @@ int mutt_index_menu (void)
     if (op != -1)
       mutt_curs_set (0);
 
-    if (menu->redraw & REDRAW_FULL)
-    {
-      menu_redraw_full (menu);
-      mutt_show_error ();
-    }
-
     if (menu->menu == MENU_MAIN)
     {
+      if (menu->redraw & REDRAW_FULL)
+      {
+        menu_redraw_full (menu);
+        mutt_show_error ();
+      }
+
 #ifdef USE_SIDEBAR
       if (menu->redraw & REDRAW_SIDEBAR || SidebarNeedsRedraw)
       {
@@ -1270,12 +1271,14 @@ int mutt_index_menu (void)
 
         mutt_sleep (0);
 
-	/* Set CurrentMenu to MENU_MAIN before executing any folder
-	 * hooks so that all the index menu functions are available to
-	 * the exec command.
-	 */
-
-	CurrentMenu = MENU_MAIN;
+        /* Note that menu->menu may be MENU_PAGER if the change folder
+         * operation originated from the pager.
+         *
+         * However, exec commands currently use CurrentMenu to determine what
+         * functions are available, which is automatically set by the
+         * mutt_push/pop_current_menu() functions.  If that changes, the menu
+         * would need to be reset here, and the pager cleanup code after the
+         * switch statement would need to be run. */
 	mutt_folder_hook (buf);
 
 	if ((Context = mx_open_mailbox (buf,
@@ -1322,12 +1325,21 @@ int mutt_index_menu (void)
 
 	if (option (OPTPGPAUTODEC) && (tag || !(CURHDR->security & PGP_TRADITIONAL_CHECKED)))
 	  mutt_check_traditional_pgp (tag ? NULL : CURHDR, &menu->redraw);
-	if ((op = mutt_display_message (CURHDR)) == -1)
+
+        /* If we are returning to the pager via an index menu redirection, we
+         * need to reset the menu->menu.  Otherwise mutt_pop_current_menu() will
+         * set CurrentMenu incorrectly when we return back to the index menu. */
+        menu->menu = MENU_MAIN;
+
+        if ((op = mutt_display_message (CURHDR)) == -1)
 	{
 	  unset_option (OPTNEEDRESORT);
 	  break;
 	}
 
+        /* This is used to redirect a single operation back here afterwards.  If
+         * mutt_display_message() returns 0, then the menu and pager state will
+         * be cleaned up after this switch statement. */
 	menu->menu = MENU_PAGER;
  	menu->oldcurrent = menu->current;
 	continue;
@@ -1948,20 +1960,18 @@ int mutt_index_menu (void)
 	CHECK_ATTACH;
 	CHECK_MSGCOUNT;
         CHECK_VISIBLE;
-	ci_bounce_message (tag ? NULL : CURHDR, &menu->redraw);
+	ci_bounce_message (tag ? NULL : CURHDR);
 	break;
 
       case OP_CREATE_ALIAS:
 
         mutt_create_alias (Context && Context->vcount ? CURHDR->env : NULL, NULL);
-	MAYBE_REDRAW (menu->redraw);
         menu->redraw |= REDRAW_CURRENT;
 	break;
 
       case OP_QUERY:
 	CHECK_ATTACH;
 	mutt_query_menu (NULL, 0);
-	MAYBE_REDRAW (menu->redraw);
 	break;
 
       case OP_PURGE_MESSAGE:
@@ -2041,7 +2051,6 @@ int mutt_index_menu (void)
 
       case OP_ENTER_COMMAND:
 
-	CurrentMenu = MENU_MAIN;
 	mutt_enter_command ();
 	mutt_check_rescore (Context);
 	if (option (OPTFORCEREDRAWINDEX))
@@ -2181,7 +2190,6 @@ int mutt_index_menu (void)
 	}
 #endif
 
-	MAYBE_REDRAW (menu->redraw);
 	break;
 
       case OP_PRINT:
@@ -2310,7 +2318,6 @@ int mutt_index_menu (void)
       case OP_SHELL_ESCAPE:
 
 	mutt_shell_escape ();
-	MAYBE_REDRAW (menu->redraw);
 	break;
 
       case OP_TAG_THREAD:
@@ -2446,14 +2453,12 @@ int mutt_index_menu (void)
       mutt_clear_pager_position ();
       menu->menu = MENU_MAIN;
       menu->redraw = REDRAW_FULL;
-#if 0
-      set_option (OPTWEED); /* turn header weeding back on. */
-#endif
     }
 
     if (done) break;
   }
 
+  mutt_pop_current_menu (menu);
   mutt_menuDestroy (&menu);
   return (close);
 }
