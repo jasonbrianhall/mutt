@@ -1291,8 +1291,6 @@ static int parse_attachments (BUFFER *buf, BUFFER *s, unsigned long data, BUFFER
     print_attach_list(AttachExclude, '-', "A");
     print_attach_list(InlineAllow,   '+', "I");
     print_attach_list(InlineExclude, '-', "I");
-    set_option (OPTFORCEREDRAWINDEX);
-    set_option (OPTFORCEREDRAWPAGER);
     mutt_any_key_to_continue (NULL);
     return 0;
   }
@@ -1436,7 +1434,7 @@ static int parse_unalias (BUFFER *buf, BUFFER *s, unsigned long data, BUFFER *er
       {
 	for (tmp = Aliases; tmp ; tmp = tmp->next) 
 	  tmp->del = 1;
-	set_option (OPTFORCEREDRAWINDEX);
+	mutt_set_current_menu_redraw_full ();
       }
       else
 	mutt_free_alias (&Aliases);
@@ -1450,7 +1448,7 @@ static int parse_unalias (BUFFER *buf, BUFFER *s, unsigned long data, BUFFER *er
 	  if (CurrentMenu == MENU_ALIAS)
 	  {
 	    tmp->del = 1;
-	    set_option (OPTFORCEREDRAWINDEX);
+	    mutt_set_current_menu_redraw_full ();
 	    break;
 	  }
 
@@ -1511,7 +1509,7 @@ static int parse_alias (BUFFER *buf, BUFFER *s, unsigned long data, BUFFER *err)
     /* override the previous value */
     rfc822_free_address (&tmp->addr);
     if (CurrentMenu == MENU_ALIAS)
-      set_option (OPTFORCEREDRAWINDEX);
+      mutt_set_current_menu_redraw_full ();
   }
 
   mutt_extract_token (buf, s, MUTT_TOKEN_QUOTE | MUTT_TOKEN_SPACE | MUTT_TOKEN_SEMICOLON);
@@ -1789,9 +1787,9 @@ static void mutt_restore_default (struct option_t *p)
   }
 
   if (p->flags & R_INDEX)
-    set_option (OPTFORCEREDRAWINDEX);
+    mutt_set_menu_redraw_full (MENU_MAIN);
   if (p->flags & R_PAGER)
-    set_option (OPTFORCEREDRAWPAGER);
+    mutt_set_menu_redraw_full (MENU_PAGER);
   if (p->flags & R_RESORT_SUB)
     set_option (OPTSORTSUBTHREADS);
   if (p->flags & R_RESORT)
@@ -1804,8 +1802,10 @@ static void mutt_restore_default (struct option_t *p)
     mutt_reflow_windows ();
 #ifdef USE_SIDEBAR
   if (p->flags & R_SIDEBAR)
-    SidebarNeedsRedraw = 1;
+    mutt_set_current_menu_redraw (REDRAW_SIDEBAR);
 #endif
+  if (p->flags & R_MENU)
+    mutt_set_current_menu_redraw_full ();
 }
 
 static size_t escape_string (char *dst, size_t len, const char* src)
@@ -1976,8 +1976,6 @@ static int parse_setenv(BUFFER *tmp, BUFFER *s, unsigned long data, BUFFER *err)
 
     if (found)
     {
-      set_option (OPTFORCEREDRAWINDEX);
-      set_option (OPTFORCEREDRAWPAGER);
       mutt_any_key_to_continue (NULL);
       return 0;
     }
@@ -2106,8 +2104,7 @@ static int parse_set (BUFFER *tmp, BUFFER *s, unsigned long data, BUFFER *err)
 	}
 	for (idx = 0; MuttVars[idx].option; idx++)
 	  mutt_restore_default (&MuttVars[idx]);
-	set_option (OPTFORCEREDRAWINDEX);
-	set_option (OPTFORCEREDRAWPAGER);
+	mutt_set_current_menu_redraw_full ();
 	set_option (OPTSORTSUBTHREADS);
 	set_option (OPTNEEDRESORT);
 	set_option (OPTRESORTINIT);
@@ -2573,9 +2570,9 @@ static int parse_set (BUFFER *tmp, BUFFER *s, unsigned long data, BUFFER *err)
     if (!myvar)
     {
       if (MuttVars[idx].flags & R_INDEX)
-        set_option (OPTFORCEREDRAWINDEX);
+        mutt_set_menu_redraw_full (MENU_MAIN);
       if (MuttVars[idx].flags & R_PAGER)
-        set_option (OPTFORCEREDRAWPAGER);
+        mutt_set_menu_redraw_full (MENU_PAGER);
       if (MuttVars[idx].flags & R_RESORT_SUB)
         set_option (OPTSORTSUBTHREADS);
       if (MuttVars[idx].flags & R_RESORT)
@@ -2588,8 +2585,10 @@ static int parse_set (BUFFER *tmp, BUFFER *s, unsigned long data, BUFFER *err)
         mutt_reflow_windows ();
 #ifdef USE_SIDEBAR
       if (MuttVars[idx].flags & R_SIDEBAR)
-        SidebarNeedsRedraw = 1;
+        mutt_set_current_menu_redraw (REDRAW_SIDEBAR);
 #endif
+      if (MuttVars[idx].flags & R_MENU)
+        mutt_set_current_menu_redraw_full ();
     }
   }
   return (r);
