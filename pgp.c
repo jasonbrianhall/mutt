@@ -114,10 +114,7 @@ int pgp_use_gpg_agent (void)
     return 0;
 
   if ((tty = ttyname(0)))
-  {
-    setenv("GPG_TTY", tty, 0);
     mutt_envlist_set ("GPG_TTY", tty, 0);
-  }
 
   return 1;
 }
@@ -1701,7 +1698,7 @@ BODY *pgp_traditional_encryptsign (BODY *a, int flags, char *keylist)
   return b;
 }
 
-int pgp_send_menu (HEADER *msg, int *redraw)
+int pgp_send_menu (HEADER *msg)
 {
   pgp_key_t p;
   char input_signas[SHORT_STRING];
@@ -1829,7 +1826,6 @@ int pgp_send_menu (HEADER *msg, int *redraw)
 
         crypt_pgp_void_passphrase ();  /* probably need a different passphrase */
       }
-      *redraw = REDRAW_FULL;
       break;
 
     case 'b': /* (b)oth */
