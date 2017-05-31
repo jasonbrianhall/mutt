@@ -226,7 +226,6 @@ WHERE short ScoreThresholdFlag;
 #ifdef USE_SIDEBAR
 WHERE short SidebarWidth;
 WHERE LIST *SidebarWhitelist INITVAL(0);
-WHERE int SidebarNeedsRedraw INITVAL (0);
 #endif
 
 #ifdef USE_IMAP
@@ -263,6 +262,7 @@ WHERE char *PgpVerifyKeyCommand;
 WHERE char *PgpListSecringCommand;
 WHERE char *PgpListPubringCommand;
 WHERE char *PgpGetkeysCommand;
+WHERE char *PgpSelfEncryptAs;
 
 /*-- formerly in smime.h --*/
 WHERE char *SmimeDefaultKey;
@@ -283,6 +283,7 @@ WHERE char *SmimePk7outCommand;
 WHERE char *SmimeGetCertCommand;
 WHERE char *SmimeImportCertCommand;
 WHERE char *SmimeGetCertEmailCommand;
+WHERE char *SmimeSelfEncryptAs;
 
 
 

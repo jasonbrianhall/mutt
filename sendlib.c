@@ -2240,6 +2240,8 @@ send_msg (const char *path, char **args, const char *msg, char **tempfile)
 	  _exit (S_ERR);
       }
 
+      /* execvpe is a glibc extension */
+      /* execvpe (path, args, mutt_envlist ()); */
       execvp (path, args);
       _exit (S_ERR);
     }
