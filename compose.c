@@ -70,32 +70,103 @@ enum
   HDR_ATTACH  = (HDR_FCC + 5) /* where to start printing the attachments */
 };
 
-#define HDR_XOFFSET 10
-#define TITLE_FMT "%10s" /* Used for Prompts, which are ASCII */
-#define W (MuttIndexWindow->cols - HDR_XOFFSET)
+int HeaderPadding[HDR_CRYPTINFO + 1] = {0};
+int MaxHeaderWidth = 0;
+
+#define HDR_XOFFSET MaxHeaderWidth
+#define W (MuttIndexWindow->cols - MaxHeaderWidth)
 
 static const char * const Prompts[] =
 {
-  "From: ",
-  "To: ",
-  "Cc: ",
-  "Bcc: ",
-  "Subject: ",
-  "Reply-To: ",
-  "Fcc: "
+  /* L10N: Compose menu field.  May not want to translate. */
+  N_("From: "),
+  /* L10N: Compose menu field.  May not want to translate. */
+  N_("To: "),
+  /* L10N: Compose menu field.  May not want to translate. */
+  N_("Cc: "),
+  /* L10N: Compose menu field.  May not want to translate. */
+  N_("Bcc: "),
+  /* L10N: Compose menu field.  May not want to translate. */
+  N_("Subject: "),
+  /* L10N: Compose menu field.  May not want to translate. */
+  N_("Reply-To: "),
+  /* L10N: Compose menu field.  May not want to translate. */
+  N_("Fcc: "),
+#ifdef MIXMASTER
+  /* L10N: "Mix" refers to the MixMaster chain for anonymous email */
+  N_("Mix: "),
+#endif
+  /* L10N: Compose menu field.  Holds "Encrypt", "Sign" related information */
+  N_("Security: "),
+  /* L10N:
+   * This string is used by the compose menu.
+   * Since it is hidden by default, it does not increase the
+   * indentation of other compose menu fields.  However, if possible,
+   * it should not be longer than the other compose menu fields.
+   *
+   * Since it shares the row with "Encrypt with:", it should not be longer
+   * than 15-20 character cells.
+   */
+  N_("Sign as: ")
 };
 
 static const struct mapping_t ComposeHelp[] = {
   { N_("Send"),    OP_COMPOSE_SEND_MESSAGE },
   { N_("Abort"),   OP_EXIT },
-  { "To",      OP_COMPOSE_EDIT_TO },
-  { "CC",      OP_COMPOSE_EDIT_CC },
-  { "Subj",    OP_COMPOSE_EDIT_SUBJECT },
+  /* L10N: compose menu help line entry */
+  { N_("To"),      OP_COMPOSE_EDIT_TO },
+  /* L10N: compose menu help line entry */
+  { N_("CC"),      OP_COMPOSE_EDIT_CC },
+  /* L10N: compose menu help line entry */
+  { N_("Subj"),    OP_COMPOSE_EDIT_SUBJECT },
   { N_("Attach file"),  OP_COMPOSE_ATTACH_FILE },
   { N_("Descrip"), OP_COMPOSE_EDIT_DESCRIPTION },
   { N_("Help"),    OP_HELP },
   { NULL,	0 }
 };
+
+static void calc_header_width_padding (int idx, const char *header, int calc_max)
+{
+  int width;
+
+  HeaderPadding[idx] = mutt_strlen (header);
+  width = mutt_strwidth (header);
+  if (calc_max && MaxHeaderWidth < width)
+    MaxHeaderWidth = width;
+  HeaderPadding[idx] -= width;
+}
+
+
+/* The padding needed for each header is strlen() + max_width - strwidth().
+ *
+ * calc_header_width_padding sets each entry in HeaderPadding to
+ * strlen - width.  Then, afterwards, we go through and add max_width
+ * to each entry.
+ */
+static void init_header_padding (void)
+{
+  static short done = 0;
+  int i;
+
+  if (done)
+    return;
+  done = 1;
+
+  for (i = 0; i <= HDR_CRYPT; i++)
+    calc_header_width_padding (i, _(Prompts[i]), 1);
+
+  /* Don't include "Sign as: " in the MaxHeaderWidth calculation.  It
+   * doesn't show up by default, and so can make the indentation of
+   * the other fields look funny. */
+  calc_header_width_padding (HDR_CRYPTINFO, _(Prompts[HDR_CRYPTINFO]), 0);
+
+  for (i = 0; i <= HDR_CRYPTINFO; i++)
+  {
+    HeaderPadding[i] += MaxHeaderWidth;
+    if (HeaderPadding[i] < 0)
+      HeaderPadding[i] = 0;
+  }
+}
 
 static void snd_entry (char *b, size_t blen, MUTTMENU *menu, int num)
 {
@@ -110,7 +181,10 @@ static void snd_entry (char *b, size_t blen, MUTTMENU *menu, int num)
 
 static void redraw_crypt_lines (HEADER *msg)
 {
-  mutt_window_mvprintw (MuttIndexWindow, HDR_CRYPT, 0, TITLE_FMT, "Security: ");
+  SETCOLOR (MT_COLOR_COMPOSE_HEADER);
+  mutt_window_mvprintw (MuttIndexWindow, HDR_CRYPT, 0,
+                        "%*s", HeaderPadding[HDR_CRYPT], _(Prompts[HDR_CRYPT]));
+  NORMAL_COLOR;
 
   if ((WithCrypto & (APPLICATION_PGP | APPLICATION_SMIME)) == 0)
   {
@@ -119,13 +193,26 @@ static void redraw_crypt_lines (HEADER *msg)
   }
 
   if ((msg->security & (ENCRYPT | SIGN)) == (ENCRYPT | SIGN))
+  {
+    SETCOLOR (MT_COLOR_COMPOSE_SECURITY_BOTH);
     addstr (_("Sign, Encrypt"));
+  }
   else if (msg->security & ENCRYPT)
+  {
+    SETCOLOR (MT_COLOR_COMPOSE_SECURITY_ENCRYPT);
     addstr (_("Encrypt"));
+  }
   else if (msg->security & SIGN)
+  {
+    SETCOLOR (MT_COLOR_COMPOSE_SECURITY_SIGN);
     addstr (_("Sign"));
+  }
   else
+  {
+    SETCOLOR (MT_COLOR_COMPOSE_SECURITY_NONE);
     addstr (_("None"));
+  }
+  NORMAL_COLOR;
 
   if ((msg->security & (ENCRYPT | SIGN)))
   {
@@ -150,20 +237,32 @@ static void redraw_crypt_lines (HEADER *msg)
 
   if ((WithCrypto & APPLICATION_PGP)
       && (msg->security & APPLICATION_PGP) && (msg->security & SIGN))
-    printw (TITLE_FMT "%s", _("sign as: "), PgpSignAs ? PgpSignAs : _("<default>"));
+  {
+    SETCOLOR (MT_COLOR_COMPOSE_HEADER);
+    printw ("%*s", HeaderPadding[HDR_CRYPTINFO], _(Prompts[HDR_CRYPTINFO]));
+    NORMAL_COLOR;
+    printw ("%s", PgpSignAs ? PgpSignAs : _("<default>"));
+  }
 
   if ((WithCrypto & APPLICATION_SMIME)
-      && (msg->security & APPLICATION_SMIME) && (msg->security & SIGN)) {
-      printw (TITLE_FMT "%s", _("sign as: "), SmimeDefaultKey ? SmimeDefaultKey : _("<default>"));
+      && (msg->security & APPLICATION_SMIME) && (msg->security & SIGN))
+  {
+    SETCOLOR (MT_COLOR_COMPOSE_HEADER);
+    printw ("%*s", HeaderPadding[HDR_CRYPTINFO], _(Prompts[HDR_CRYPTINFO]));
+    NORMAL_COLOR;
+    printw ("%s", SmimeDefaultKey ? SmimeDefaultKey : _("<default>"));
   }
 
   if ((WithCrypto & APPLICATION_SMIME)
       && (msg->security & APPLICATION_SMIME)
       && (msg->security & ENCRYPT)
       && SmimeCryptAlg
-      && *SmimeCryptAlg) {
-    mutt_window_mvprintw (MuttIndexWindow, HDR_CRYPTINFO, 40, "%s%s", _("Encrypt with: "),
-		NONULL(SmimeCryptAlg));
+      && *SmimeCryptAlg)
+  {
+    SETCOLOR (MT_COLOR_COMPOSE_HEADER);
+    mutt_window_mvprintw (MuttIndexWindow, HDR_CRYPTINFO, 40, "%s", _("Encrypt with: "));
+    NORMAL_COLOR;
+    printw ("%s", NONULL(SmimeCryptAlg));
   }
 }
 
@@ -175,8 +274,10 @@ static void redraw_mix_line (LIST *chain)
   int c;
   char *t;
 
-  /* L10N: "Mix" refers to the MixMaster chain for anonymous email */
-  mutt_window_mvprintw (MuttIndexWindow, HDR_MIX, 0, TITLE_FMT, _("Mix: "));
+  SETCOLOR (MT_COLOR_COMPOSE_HEADER);
+  mutt_window_mvprintw (MuttIndexWindow, HDR_MIX, 0,
+                        "%*s", HeaderPadding[HDR_MIX], _(Prompts[HDR_MIX]));
+  NORMAL_COLOR;
 
   if (!chain)
   {
@@ -243,7 +344,10 @@ static void draw_envelope_addr (int line, ADDRESS *addr)
 
   buf[0] = 0;
   rfc822_write_address (buf, sizeof (buf), addr, 1);
-  mutt_window_mvprintw (MuttIndexWindow, line, 0, TITLE_FMT, Prompts[line]);
+  SETCOLOR (MT_COLOR_COMPOSE_HEADER);
+  mutt_window_mvprintw (MuttIndexWindow, line, 0,
+                        "%*s", HeaderPadding[line], _(Prompts[line]));
+  NORMAL_COLOR;
   mutt_paddstr (W, buf);
 }
 
@@ -253,10 +357,19 @@ static void draw_envelope (HEADER *msg, char *fcc)
   draw_envelope_addr (HDR_TO, msg->env->to);
   draw_envelope_addr (HDR_CC, msg->env->cc);
   draw_envelope_addr (HDR_BCC, msg->env->bcc);
-  mutt_window_mvprintw (MuttIndexWindow, HDR_SUBJECT, 0, TITLE_FMT, Prompts[HDR_SUBJECT]);
+
+  SETCOLOR (MT_COLOR_COMPOSE_HEADER);
+  mutt_window_mvprintw (MuttIndexWindow, HDR_SUBJECT, 0,
+                        "%*s", HeaderPadding[HDR_SUBJECT], _(Prompts[HDR_SUBJECT]));
+  NORMAL_COLOR;
   mutt_paddstr (W, NONULL (msg->env->subject));
+
   draw_envelope_addr (HDR_REPLYTO, msg->env->reply_to);
-  mutt_window_mvprintw (MuttIndexWindow, HDR_FCC, 0, TITLE_FMT, Prompts[HDR_FCC]);
+
+  SETCOLOR (MT_COLOR_COMPOSE_HEADER);
+  mutt_window_mvprintw (MuttIndexWindow, HDR_FCC, 0,
+                        "%*s", HeaderPadding[HDR_FCC], _(Prompts[HDR_FCC]));
+  NORMAL_COLOR;
   mutt_paddstr (W, fcc);
 
   if (WithCrypto)
@@ -273,24 +386,18 @@ static void draw_envelope (HEADER *msg, char *fcc)
   NORMAL_COLOR;
 }
 
-static int edit_address_list (int line, ADDRESS **addr)
+static void edit_address_list (int line, ADDRESS **addr)
 {
   char buf[HUGE_STRING] = ""; /* needs to be large for alias expansion */
   char *err = NULL;
   
   mutt_addrlist_to_local (*addr);
   rfc822_write_address (buf, sizeof (buf), *addr, 0);
-  if (mutt_get_field (Prompts[line], buf, sizeof (buf), MUTT_ALIAS) == 0)
+  if (mutt_get_field (_(Prompts[line]), buf, sizeof (buf), MUTT_ALIAS) == 0)
   {
     rfc822_free_address (addr);
     *addr = mutt_parse_adrlist (*addr, buf);
     *addr = mutt_expand_aliases (*addr);
-  }
-
-  if (option (OPTNEEDREDRAW))
-  {
-    unset_option (OPTNEEDREDRAW);
-    return (REDRAW_FULL);
   }
 
   if (mutt_addrlist_to_intl (*addr, &err) != 0)
@@ -305,8 +412,6 @@ static int edit_address_list (int line, ADDRESS **addr)
   rfc822_write_address (buf, sizeof (buf), *addr, 1);
   mutt_window_move (MuttIndexWindow, line, HDR_XOFFSET);
   mutt_paddstr (W, buf);
-  
-  return 0;
 }
 
 static int delete_attachment (MUTTMENU *menu, short *idxlen, int x)
@@ -476,6 +581,54 @@ static void compose_status_line (char *buf, size_t buflen, size_t col, int cols,
         (unsigned long) menu, 0);
 }
 
+typedef struct
+{
+  HEADER *msg;
+  char *fcc;
+} compose_redraw_data_t;
+
+static void compose_menu_redraw (MUTTMENU *menu)
+{
+  char buf[LONG_STRING];
+  compose_redraw_data_t *rd = menu->redraw_data;
+
+  if (!rd)
+    return;
+
+  if (menu->redraw & REDRAW_FULL)
+  {
+    menu_redraw_full (menu);
+
+    draw_envelope (rd->msg, rd->fcc);
+    menu->offset = HDR_ATTACH;
+    menu->pagelen = MuttIndexWindow->rows - HDR_ATTACH;
+  }
+
+  menu_check_recenter (menu);
+
+  if (menu->redraw & REDRAW_STATUS)
+  {
+    compose_status_line (buf, sizeof (buf), 0, MuttStatusWindow->cols, menu, NONULL(ComposeFormat));
+    mutt_window_move (MuttStatusWindow, 0, 0);
+    SETCOLOR (MT_COLOR_STATUS);
+    mutt_paddstr (MuttStatusWindow->cols, buf);
+    NORMAL_COLOR;
+    menu->redraw &= ~REDRAW_STATUS;
+  }
+
+#ifdef USE_SIDEBAR
+  if (menu->redraw & REDRAW_SIDEBAR)
+    menu_redraw_sidebar (menu);
+#endif
+
+  if (menu->redraw & REDRAW_INDEX)
+    menu_redraw_index (menu);
+  else if (menu->redraw & (REDRAW_MOTION | REDRAW_MOTION_RESYNCH))
+    menu_redraw_motion (menu);
+  else if (menu->redraw == REDRAW_CURRENT)
+    menu_redraw_current (menu);
+}
+
 
 /* return values:
  *
@@ -505,6 +658,12 @@ int mutt_compose_menu (HEADER *msg,   /* structure for new message */
   /* Sort, SortAux could be changed in mutt_index_menu() */
   int oldSort, oldSortAux;
   struct stat st;
+  compose_redraw_data_t rd;
+
+  init_header_padding ();
+
+  rd.msg = msg;
+  rd.fcc = fcc;
 
   mutt_attach_init (msg->content);
   idx = mutt_gen_attach_list (msg->content, -1, idx, &idxlen, &idxmax, 0, 1);
@@ -516,22 +675,20 @@ int mutt_compose_menu (HEADER *msg,   /* structure for new message */
   menu->tag = mutt_tag_attach;
   menu->data = idx;
   menu->help = mutt_compile_help (helpstr, sizeof (helpstr), MENU_COMPOSE, ComposeHelp);
+  menu->custom_menu_redraw = compose_menu_redraw;
+  menu->redraw_data = &rd;
+  mutt_push_current_menu (menu);
 
   while (loop)
   {
     switch (op = mutt_menuLoop (menu))
     {
-      case OP_REDRAW:
-	draw_envelope (msg, fcc);
-	menu->offset = HDR_ATTACH;
-	menu->pagelen = MuttIndexWindow->rows - HDR_ATTACH;
-	break;
       case OP_COMPOSE_EDIT_FROM:
-	menu->redraw = edit_address_list (HDR_FROM, &msg->env->from);
+	edit_address_list (HDR_FROM, &msg->env->from);
         mutt_message_hook (NULL, msg, MUTT_SEND2HOOK);
 	break;
       case OP_COMPOSE_EDIT_TO:
-	menu->redraw = edit_address_list (HDR_TO, &msg->env->to);
+	edit_address_list (HDR_TO, &msg->env->to);
 	if (option (OPTCRYPTOPPORTUNISTICENCRYPT))
 	{
 	  crypt_opportunistic_encrypt (msg);
@@ -540,7 +697,7 @@ int mutt_compose_menu (HEADER *msg,   /* structure for new message */
         mutt_message_hook (NULL, msg, MUTT_SEND2HOOK);
         break;
       case OP_COMPOSE_EDIT_BCC:
-	menu->redraw = edit_address_list (HDR_BCC, &msg->env->bcc);
+	edit_address_list (HDR_BCC, &msg->env->bcc);
 	if (option (OPTCRYPTOPPORTUNISTICENCRYPT))
 	{
 	  crypt_opportunistic_encrypt (msg);
@@ -549,7 +706,7 @@ int mutt_compose_menu (HEADER *msg,   /* structure for new message */
         mutt_message_hook (NULL, msg, MUTT_SEND2HOOK);
 	break;
       case OP_COMPOSE_EDIT_CC:
-	menu->redraw = edit_address_list (HDR_CC, &msg->env->cc);
+	edit_address_list (HDR_CC, &msg->env->cc);
 	if (option (OPTCRYPTOPPORTUNISTICENCRYPT))
 	{
 	  crypt_opportunistic_encrypt (msg);
@@ -562,7 +719,7 @@ int mutt_compose_menu (HEADER *msg,   /* structure for new message */
 	  strfcpy (buf, msg->env->subject, sizeof (buf));
 	else
 	  buf[0] = 0;
-	if (mutt_get_field ("Subject: ", buf, sizeof (buf), 0) == 0)
+	if (mutt_get_field (_("Subject: "), buf, sizeof (buf), 0) == 0)
 	{
 	  mutt_str_replace (&msg->env->subject, buf);
 	  mutt_window_move (MuttIndexWindow, HDR_SUBJECT, HDR_XOFFSET);
@@ -574,12 +731,12 @@ int mutt_compose_menu (HEADER *msg,   /* structure for new message */
         mutt_message_hook (NULL, msg, MUTT_SEND2HOOK);
         break;
       case OP_COMPOSE_EDIT_REPLY_TO:
-	menu->redraw = edit_address_list (HDR_REPLYTO, &msg->env->reply_to);
+	edit_address_list (HDR_REPLYTO, &msg->env->reply_to);
         mutt_message_hook (NULL, msg, MUTT_SEND2HOOK);
 	break;
       case OP_COMPOSE_EDIT_FCC:
 	strfcpy (buf, fcc, sizeof (buf));
-	if (mutt_get_field ("Fcc: ", buf, sizeof (buf), MUTT_FILE | MUTT_CLEAR) == 0)
+	if (mutt_get_field (_("Fcc: "), buf, sizeof (buf), MUTT_FILE | MUTT_CLEAR) == 0)
 	{
 	  strfcpy (fcc, buf, fcclen);
 	  mutt_pretty_mailbox (fcc, fcclen);
@@ -587,7 +744,6 @@ int mutt_compose_menu (HEADER *msg,   /* structure for new message */
 	  mutt_paddstr (W, fcc);
 	  fccSet = 1;
 	}
-	MAYBE_REDRAW (menu->redraw);
         mutt_message_hook (NULL, msg, MUTT_SEND2HOOK);
         break;
       case OP_COMPOSE_EDIT_MESSAGE:
@@ -666,12 +822,6 @@ int mutt_compose_menu (HEADER *msg,   /* structure for new message */
 	  FREE (&idx[idxlen]);
 
 	menu->redraw |= REDRAW_STATUS;
-
-	if (option(OPTNEEDREDRAW))
-	{
-	  menu->redraw = REDRAW_FULL;
-	  unset_option(OPTNEEDREDRAW);
-	}
 	
         mutt_message_hook (NULL, msg, MUTT_SEND2HOOK);
         break;
@@ -687,7 +837,7 @@ int mutt_compose_menu (HEADER *msg,   /* structure for new message */
 	  numfiles = 0;
 	  files = NULL;
 
-	  if (_mutt_enter_fname (prompt, fname, sizeof (fname), &menu->redraw, 0, 1, &files, &numfiles) == -1 ||
+	  if (_mutt_enter_fname (prompt, fname, sizeof (fname), 0, 1, &files, &numfiles) == -1 ||
 	      *fname == '\0')
 	    break;
 
@@ -739,7 +889,7 @@ int mutt_compose_menu (HEADER *msg,   /* structure for new message */
 	    mutt_pretty_mailbox (fname, sizeof (fname));
 	  }
 
-	  if (mutt_enter_fname (prompt, fname, sizeof (fname), &menu->redraw, 1) == -1 || !fname[0])
+	  if (mutt_enter_fname (prompt, fname, sizeof (fname), 1) == -1 || !fname[0])
 	    break;
 
 	  mutt_expand_path (fname, sizeof (fname));
@@ -1164,7 +1314,6 @@ int mutt_compose_menu (HEADER *msg,   /* structure for new message */
       case OP_SAVE:
 	CHECK_COUNT;
 	mutt_save_attachment_list (NULL, menu->tagprefix, menu->tagprefix ?  msg->content : idx[menu->current]->content, NULL, menu);
-	MAYBE_REDRAW (menu->redraw);
         /* no send2hook, since this doesn't modify the message */
 	break;
 
@@ -1250,7 +1399,7 @@ int mutt_compose_menu (HEADER *msg,   /* structure for new message */
        if (idxlen)
          msg->content = idx[0]->content;
        if (mutt_enter_fname (_("Write message to mailbox"), fname, sizeof (fname),
-                             &menu->redraw, 1) != -1 && fname[0])
+                             1) != -1 && fname[0])
        {
          mutt_message (_("Writing message to %s ..."), fname);
          mutt_expand_path (fname, sizeof (fname));
@@ -1288,7 +1437,7 @@ int mutt_compose_menu (HEADER *msg,   /* structure for new message */
           crypt_opportunistic_encrypt (msg);
           redraw_crypt_lines (msg);
 	}
-	msg->security = crypt_pgp_send_menu (msg, &menu->redraw);
+	msg->security = crypt_pgp_send_menu (msg);
 	redraw_crypt_lines (msg);
         mutt_message_hook (NULL, msg, MUTT_SEND2HOOK);
         break;
@@ -1321,7 +1470,7 @@ int mutt_compose_menu (HEADER *msg,   /* structure for new message */
           crypt_opportunistic_encrypt (msg);
           redraw_crypt_lines (msg);
 	}
-	msg->security = crypt_smime_send_menu(msg, &menu->redraw);
+	msg->security = crypt_smime_send_menu(msg);
 	redraw_crypt_lines (msg);
         mutt_message_hook (NULL, msg, MUTT_SEND2HOOK);
         break;
@@ -1330,25 +1479,15 @@ int mutt_compose_menu (HEADER *msg,   /* structure for new message */
 #ifdef MIXMASTER
       case OP_COMPOSE_MIX:
       
-      	mix_make_chain (&msg->chain, &menu->redraw);
+      	mix_make_chain (&msg->chain);
         mutt_message_hook (NULL, msg, MUTT_SEND2HOOK);
         break;
 #endif
 
     }
-
-    /* Draw formatted compose status line */
-    if (menu->redraw & REDRAW_STATUS) 
-    {
-        compose_status_line (buf, sizeof (buf), 0, MuttStatusWindow->cols, menu, NONULL(ComposeFormat));
-	mutt_window_move (MuttStatusWindow, 0, 0);
-	SETCOLOR (MT_COLOR_STATUS);
-	mutt_paddstr (MuttStatusWindow->cols, buf);
-	NORMAL_COLOR;
-	menu->redraw &= ~REDRAW_STATUS;
-    }
   }
 
+  mutt_pop_current_menu (menu);
   mutt_menuDestroy (&menu);
 
   if (idxlen)

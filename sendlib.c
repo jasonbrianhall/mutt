@@ -2240,6 +2240,8 @@ send_msg (const char *path, char **args, const char *msg, char **tempfile)
 	  _exit (S_ERR);
       }
 
+      /* execvpe is a glibc extension */
+      /* execvpe (path, args, mutt_envlist ()); */
       execvp (path, args);
       _exit (S_ERR);
     }
@@ -2443,6 +2445,13 @@ mutt_invoke_sendmail (ADDRESS *from,	/* the sender */
     safe_realloc (&args, sizeof (char *) * (++argsmax));
 
   args[argslen++] = NULL;
+
+  /* Some user's $sendmail command uses gpg for password decryption,
+   * and is set up to prompt using ncurses pinentry.  If we
+   * mutt_endwin() it leaves other users staring at a blank screen.
+   * So instead, just force a hard redraw on the next refresh. */
+  if (!option (OPTNOCURSES))
+    mutt_need_hard_redraw ();
 
   if ((i = send_msg (path, args, msg, option(OPTNOCURSES) ? NULL : &childout)) != (EX_OK & 0xff))
   {
